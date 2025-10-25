@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grist Dynamic Dashboard - v3.4 Composants Enfants</title>
+    <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f8fafc;
+            height: 100vh;
+            display: grid;
+            grid-template-rows: 60px 1fr;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .header h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .version-badge {
+            background: rgba(255,255,255,0.2);
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        
+        .nav {
+            margin-left: auto;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        
+        .nav-btn {
+            background: rgba(255,255,255,0.2);
+            border: none;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 14px;
+        }
+        
+        .nav-btn:hover {
+            background: rgba(255,255,255,0.3);
+        }
+        
+        .nav-btn.active {
+            background: rgba(255,255,255,0.4);
+            font-weight: 600;
+        }
+        
+        .main {
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .component-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            padding: 20px;
+            background: white;
+            overflow-y: auto;
+        }
+        
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: #64748b;
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+        
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #e2e8f0;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .error-container {
+            background: #fee2e2;
+            color: #dc2626;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px;
+            border: 1px solid #fecaca;
+        }
+        
+        .error-container h3 {
+            margin-bottom: 10px;
+        }
+        
+        .error-container pre {
+            background: #fef2f2;
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <h1>Paiement des astreintes</h1>
+        <nav class="nav" id="navigation"></nav>
+    </header>
+    
+    <main class="main" id="main-content">
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <div>Chargement des composants...</div>
+        </div>
+    </main>
+
+    <script>
+        // SOLUTION OPTIMALE v3.4 : Support des composants enfants
+        class OptimalGristDashboard {
+            constructor() {
+                this.components = new Map();
+                this.currentComponent = null;
+                this.isReady = false;
+                this.gristAPI = null;
+            }
+
+            async init() {
+                try {
+                    console.log('🚀 Initialisation système optimal v3.4 (composants enfants)');
+                    
+                    // Initialiser Grist API
+                    await grist.ready({ requiredAccess: 'read table' });
+                    this.setupGristAPI();
+                    
+                    // Charger les composants
+                    await this.loadComponents();
+                    
+                    // Configurer la navigation
+                    this.setupNavigation();
+                    
+                    this.hideLoading();
+                    this.isReady = true;
+
+                    // Charger le composant par défaut
+                    await this.loadDefaultComponent();                    
+                    
+                    console.log('✅ Système optimal prêt avec support composants enfants');
+                    
+                } catch (error) {
+                    console.error('❌ Erreur initialisation:', error);
+                    this.showError('Erreur initialisation', error.message);
+                }
+            }
+
+            setupGristAPI() {
+                // Référence à l'instance pour utilisation dans les méthodes
+                const self = this;
+                
+                // API simplifiée pour les composants avec support composants enfants
+                this.gristAPI = {
+                    // Récupérer des données avec debug du format columnar de Grist
+                    getData: async (tableName) => {
+                        try {
+                            const result = await grist.docApi.fetchTable(tableName);
+                            console.log(`🔍 Données brutes pour ${tableName}:`, result);
+                            
+                            // Grist retourne un format columnar : {id: [1,2,3], name: ['a','b','c']}
+                            if (result && typeof result === 'object' && !Array.isArray(result)) {
+                                // Vérifier si c'est vraiment du format columnar (au moins une propriété est un array)
+                                const columns = Object.keys(result);
+                                const isColumnar = columns.length > 0 && columns.some(col => Array.isArray(result[col]));
+                                
+                                console.log(`🔧 Analyse format ${tableName}:`, {
+                                    columns,
+                                    isColumnar,
+                                    columnTypes: columns.map(col => ({ [col]: Array.isArray(result[col]) ? 'array' : typeof result[col] }))
+                                });
+                                
+                                if (isColumnar) {
+                                    // Convertir format columnar en array d'objets
+                                    const firstArrayCol = columns.find(col => Array.isArray(result[col]));
+                                    const rowCount = result[firstArrayCol]?.length || 0;
+                                    
+                                    console.log(`🔧 Conversion columnar ${tableName}:`, {
+                                        columns,
+                                        firstArrayCol,
+                                        rowCount,
+                                        sampleData: result[firstArrayCol]?.slice(0, 2)
+                                    });
+                                    
+                                    const rows = [];
+                                    
+                                    for (let i = 0; i < rowCount; i++) {
+                                        const row = {};
+                                        columns.forEach(col => {
+                                            if (Array.isArray(result[col])) {
+                                                row[col] = result[col][i];
+                                            } else {
+                                                row[col] = result[col]; // Valeur scalaire
+                                            }
+                                        });
+                                        rows.push(row);
+                                    }
+                                    
+                                    console.log(`✅ Données converties pour ${tableName}:`, rows.slice(0, 2));
+                                    return rows;
+                                } else {
+                                    console.log(`❌ Format non-columnar détecté pour ${tableName}:`, result);
+                                    return [];
+                                }
+                            }
+                            
+                            // Fallback pour autres formats
+                            if (Array.isArray(result)) {
+                                console.log(`📋 Format array détecté pour ${tableName}`);
+                                return result;
+                            } else if (result && Array.isArray(result.records)) {
+                                console.log(`📋 Format .records détecté pour ${tableName}`);
+                                return result.records;
+                            } else if (result && result.data && Array.isArray(result.data)) {
+                                console.log(`📋 Format .data détecté pour ${tableName}`);
+                                return result.data;
+                            } else {
+                                console.warn(`🔄 Format columnar détecté pour table ${tableName}:`, result);
+                                return [];
+                            }
+                        } catch (error) {
+                            console.warn(`❌ Table ${tableName} non trouvée:`, error);
+                            return [];
+                        }
+                    },
+                    
+                    // Ajouter un enregistrement
+                    addRecord: async (tableName, record) => {
+                        try {
+                            const result = await grist.docApi.applyUserActions([
+                                ['AddRecord', tableName, null, record]
+                            ]);
+                            return result[0];
+                        } catch (error) {
+                            console.error('Erreur ajout:', error);
+                            throw error;
+                        }
+                    },
+                    
+                    // Modifier un enregistrement
+                    updateRecord: async (tableName, recordId, updates) => {
+                        try {
+                            await grist.docApi.applyUserActions([
+                                ['UpdateRecord', tableName, recordId, updates]
+                            ]);
+                            return true;
+                        } catch (error) {
+                            console.error('Erreur modification:', error);
+                            throw error;
+                        }
+                    },
+                    
+                    // Supprimer un enregistrement
+                    deleteRecord: async (tableName, recordId) => {
+                        try {
+                            await grist.docApi.applyUserActions([
+                                ['RemoveRecord', tableName, recordId]
+                            ]);
+                            return true;
+                        } catch (error) {
+                            console.error('Erreur suppression:', error);
+                            throw error;
+                        }
+                    },
+                    
+                    // Navigation
+                    navigate: (componentId) => {
+                        self.loadComponent(componentId);
+                    },
+                    
+                    // Composants enfants - NOUVEAU
+                    getChildComponent: async (templateId) => {
+                        const templates = await self.gristAPI.getData('Templates_2');
+                        const template = templates.find(t => t.template_id === templateId);
+                        
+                        if (!template) {
+                            console.warn(`Composant enfant ${templateId} non trouvé`);
+                            return null;
+                        }
+                        
+                        console.log(`🧩 Chargement composant enfant: ${templateId}`);
+                        return self.createChildComponent(template);
+                    },
+                    
+                    // Créer un composant React à partir du template
+                    createChildComponent: (template) => {
+                        return self.createChildComponent(template);
+                    }
+                };
+            }
+
+            // Méthode pour créer un composant enfant
+            createChildComponent(template) {
+                try {
+                    // Transformer le code JSX avec Babel
+                    const transformedCode = Babel.transform(template.component_code, {
+                        presets: ['react'],
+                        plugins: ['proposal-class-properties']
+                    }).code;
+                    
+                    // Créer la fonction composant
+                    const componentFunction = new Function(
+                        'React',
+                        'useState',
+                        'useEffect',
+                        'useCallback',
+                        'gristAPI',
+                        `
+                        ${transformedCode}
+                        return Component;
+                        `
+                    );
+                    
+                    // Retourner le composant React
+                    return componentFunction(
+                        React,
+                        React.useState,
+                        React.useEffect,
+                        React.useCallback,
+                        this.gristAPI
+                    );
+                    
+                } catch (error) {
+                    console.error(`Erreur création composant enfant ${template.template_id}:`, error);
+                    return () => React.createElement('div', { 
+                        style: { 
+                            padding: '8px', 
+                            background: '#fee2e2', 
+                            color: '#dc2626', 
+                            borderRadius: '4px',
+                            fontSize: '12px'
+                        } 
+                    }, `Erreur: ${template.template_id}`);
+                }
+            }
+
+            async loadComponents() {
+                try {
+                    // Charger les composants depuis la table Templates
+                    const templatesData = await this.gristAPI.getData('Templates_2');
+                    
+                    // Maintenant templatesData est déjà un array d'objets grâce à la conversion columnar
+                    const templates = Array.isArray(templatesData) ? templatesData : [];
+                    
+                    console.log('📊 Templates trouvés:', templates);
+                    
+                    if (!templates || templates.length === 0) {
+                        console.log('🔄 Aucun composant Grist trouvé, chargement des composants par défaut');
+                        // this.loadDefaultComponents();
+                        return;
+                    }
+                    
+                    console.log(`📊 ${templates.length} composants trouvés dans Grist`);
+                    
+                    for (const template of templates) {
+                        try {
+                            const component = this.processComponent(template);
+                            this.components.set(component.id, component);
+                            console.log(`✅ Composant ${component.id} chargé`);
+                        } catch (error) {
+                            console.warn(`❌ Erreur composant ${template.template_id}:`, error);
+                        }
+                    }
+                    
+                } catch (error) {
+                    console.error('Erreur chargement composants:', error);
+                    // this.loadDefaultComponents();
+                }
+            }
+
+            processComponent(template) {
+                // FORMAT STANDARDISÉ : Composant React en JSON
+                const componentData = {
+                    id: template.template_id,
+                    name: template.template_name,
+                    type: template.component_type || 'functional',
+                    code: template.component_code
+                };
+
+                // Validation du code
+                if (!componentData.code || typeof componentData.code !== 'string') {
+                    throw new Error('Code composant manquant ou invalide');
+                }
+
+                // Nettoyage du code
+                const cleanCode = this.sanitizeCode(componentData.code);
+
+                return {
+                    id: componentData.id,
+                    name: componentData.name,
+                    type: componentData.type,
+                    code: cleanCode,
+                    render: async (container) => {
+                        await this.renderReactComponent(container, cleanCode, componentData.id);
+                    }
+                };
+            }
+
+            sanitizeCode(code) {
+                // Nettoyage sécurisé du code
+                return code
+                    .replace(/\r\n/g, '\n')           // Normaliser les retours à la ligne
+                    .replace(/\u0000-\u001F/g, '')    // Supprimer les caractères de contrôle
+                    .trim();
+            }
+
+            async renderReactComponent(container, code, componentId) {
+                try {
+                    // Nettoyer le conteneur
+                    container.innerHTML = '';
+                    
+                    // Créer le conteneur React
+                    const reactContainer = document.createElement('div');
+                    reactContainer.id = `react-container-${componentId}`;
+                    reactContainer.className = 'component-container';
+                    container.appendChild(reactContainer);
+
+                    // Transformer le code JSX avec Babel
+                    const transformedCode = Babel.transform(code, {
+                        presets: ['react'],
+                        plugins: ['proposal-class-properties']
+                    }).code;
+
+                    // Créer la fonction composant avec contexte sécurisé
+                    const componentFunction = new Function(
+                        'React',
+                        'ReactDOM', 
+                        'gristAPI',
+                        'container',
+                        `
+                        const { useState, useEffect, useCallback } = React;
+                        const { render } = ReactDOM;
+                        
+                        ${transformedCode}
+                        
+                        // Rendu du composant
+                        if (typeof Component !== 'undefined') {
+                            render(React.createElement(Component), container);
+                        } else {
+                            throw new Error('Composant non défini - assurez-vous de définir une variable Component');
+                        }
+                        `
+                    );
+
+                    // Exécuter avec le contexte sécurisé
+                    componentFunction(React, ReactDOM, this.gristAPI, reactContainer);
+                    
+                } catch (error) {
+                    console.error('Erreur rendu composant:', error);
+                    this.showComponentError(container, error, componentId);
+                }
+            }
+
+            showComponentError(container, error, componentId) {
+                container.innerHTML = `
+                    <div class="error-container">
+                        <h3>🚨 Erreur Composant: ${componentId}</h3>
+                        <p><strong>Message:</strong> ${error.message}</p>
+                        <pre>${error.stack || 'Pas de stack trace'}</pre>
+                        <p><strong>Suggestions:</strong></p>
+                        <ul>
+                            <li>Vérifiez la syntaxe JSX</li>
+                            <li>Assurez-vous que la variable 'Component' est définie</li>
+                            <li>Vérifiez les imports React</li>
+                        </ul>
+                    </div>
+                `;
+            }
+
+            setupNavigation() {
+                const nav = document.getElementById('navigation');
+                nav.innerHTML = '';
+                
+                // Indicateur de source
+                const indicator = document.createElement('span');
+                indicator.style.cssText = `
+                    background: ${this.components.size > 0 ? '#10b981' : '#f59e0b'};
+                    color: white;
+                    padding: 4px 8px;
+                    border-radius: 4px;
+                    font-size: 11px;
+                    margin-right: 10px;
+                `;
+                indicator.textContent = this.components.size > 0 ? 'CHILD-COMP' : 'LOADING';
+                // nav.appendChild(indicator);
+                
+                // Boutons de navigation
+                this.components.forEach(component => {
+                    const btn = document.createElement('button');
+                    btn.className = 'nav-btn';
+                    btn.textContent = component.name;
+                    btn.onclick = () => this.loadComponent(component.id);
+                    nav.appendChild(btn);
+                });
+            }
+
+            async loadComponent(componentId) {
+                if (!this.isReady) return;
+                
+                try {
+                    const component = this.components.get(componentId);
+                    if (!component) {
+                        throw new Error('Composant non trouvé: ' + componentId);
+                    }
+                    
+                    console.log(`🔄 Chargement composant: ${componentId}`);
+                    
+                    const main = document.getElementById('main-content');
+                    await component.render(main);
+                    
+                    // Mise à jour navigation
+                    document.querySelectorAll('.nav-btn').forEach(btn => {
+                        btn.classList.toggle('active', btn.textContent === component.name);
+                    });
+                    
+                    this.currentComponent = componentId;
+                    
+                } catch (error) {
+                    console.error('Erreur chargement composant:', error);
+                    this.showError('Erreur chargement composant', error.message);
+                }
+            }
+
+            async loadDefaultComponent() {
+                if (this.components.size > 0) {
+                    const firstComponent = Array.from(this.components.keys())[0];
+                    await this.loadComponent(firstComponent);
+                }
+            }
+
+            hideLoading() {
+                const loading = document.getElementById('loading');
+                if (loading) loading.style.display = 'none';
+            }
+
+            showError(title, message) {
+                const main = document.getElementById('main-content');
+                main.innerHTML = `
+                    <div class="error-container">
+                        <h3>🚨 ${title}</h3>
+                        <p>${message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        // Initialisation
+        window.dashboard = new OptimalGristDashboard();
+        document.addEventListener('DOMContentLoaded', () => {
+            window.dashboard.init();
+        });
+    </script>
+</body>
+</html>
