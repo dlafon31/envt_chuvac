@@ -1,6 +1,17 @@
 const Component = () => {
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
   const [personnels, setPersonnels] = useState([]);
+  const [allPersonnels, setAllPersonnels] = useState([]); // Tous les personnels
+  const [services, setServices] = useState([]); // Liste des services
+  const [groupes, setGroupes] = useState([]); // Liste des groupes
+  const [filterMode, setFilterMode] = useState('services'); // 'services' ou 'groupes'
+  const [selectedService, setSelectedService] = useState(null); // Service sélectionné
+  const [selectedGroupe, setSelectedGroupe] = useState(null); // Groupe sélectionné
+  const [userInfo, setUserInfo] = useState(null); // Informations utilisateur connecté
+  const [userPersonnelId, setUserPersonnelId] = useState(null); // ID du personnel correspondant à l'utilisateur
+  const [isRestrictedUser, setIsRestrictedUser] = useState(false); // Restriction utilisateur
+  const [isResponsable, setIsResponsable] = useState(false); // Utilisateur responsable
+  const [userServiceId, setUserServiceId] = useState(null); // Service de l'utilisateur
   const [conges, setConges] = useState([]);
   const [typeConges, setTypeConges] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -11,6 +22,12 @@ const Component = () => {
   const [checkedCells, setCheckedCells] = useState({});
   // État pour stocker l'état initial (pour détecter les changements)
   const [initialCheckedCells, setInitialCheckedCells] = useState({});
+  
+  // État simple pour forcer la mise à jour du bouton
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  
+  // Flag pour savoir si l'initialisation est terminée
+  const [isInitialized, setIsInitialized] = useState(false);
   
   // État pour la sélection multiple
   const [isSelecting, setIsSelecting] = useState(false);
@@ -205,35 +222,247 @@ const Component = () => {
     return changes;
   };
 
+  // Fonction pour filtrer les personnels par service
+  const filterPersonnelsByService = (serviceId) => {
+    if (!serviceId) {
+      return allPersonnels;
+    }
+    return allPersonnels.filter(p => p.serviceId === serviceId);
+  };
+
+  // Fonction pour filtrer les personnels par groupe
+  const filterPersonnelsByGroupe = (groupeId) => {
+    if (!groupeId) {
+      return allPersonnels;
+    }
+    return allPersonnels.filter(p => {
+      // La colonne Groupes contient un tableau JSON d'IDs
+      if (p.groupes && Array.isArray(p.groupes)) {
+        return p.groupes.includes(groupeId);
+      }
+      return false;
+    });
+  };
+
+  // Fonction pour filtrer selon le mode actuel
+  const filterPersonnels = () => {
+    if (filterMode === 'services') {
+      return filterPersonnelsByService(selectedService);
+    } else {
+      return filterPersonnelsByGroupe(selectedGroupe);
+    }
+  };
+
+  // Fonction pour vérifier si un personnel peut être modifié
+  const canModifyPersonnel = (personnelId) => {
+    // Si l'utilisateur n'est pas restreint, il peut modifier tout le monde
+    if (!isRestrictedUser) {
+      return true;
+    }
+    
+    // Si l'utilisateur est restreint :
+    // 1. Il peut toujours modifier ses propres congés
+    if (personnelId === userPersonnelId) {
+      return true;
+    }
+    
+    // 2. S'il est responsable, il peut modifier les congés des personnels de son service
+    if (isResponsable && userServiceId) {
+      const targetPersonnel = allPersonnels.find(p => p.id === personnelId);
+      if (targetPersonnel && targetPersonnel.serviceId === userServiceId) {
+        return true;
+      }
+    }
+    
+    // Sinon, pas d'autorisation
+    return false;
+  };
+
+  // Fonction pour initialiser les informations utilisateur
+  const initializeUserInfo = async (allPersonnelsData) => {
+    try {
+      // Récupérer le premier utilisateur
+      const utilisateursData = await gristAPI.getData('Utilisateurs');
+      
+      if (utilisateursData.length > 0) {
+        const firstUser = utilisateursData[0];
+        setUserInfo(firstUser);
+        
+        const userEmail = firstUser.Email;
+        
+        if (userEmail) {
+          // Chercher le personnel correspondant à cet email
+          const matchingPersonnel = allPersonnelsData.find(p => p.email === userEmail);
+          
+          if (matchingPersonnel) {
+            setUserPersonnelId(matchingPersonnel.id);
+            setIsRestrictedUser(true);
+            
+            // Vérifier si l'utilisateur est responsable
+            const isUserResponsable = matchingPersonnel.responsable === true || matchingPersonnel.responsable === 'true';
+            setIsResponsable(isUserResponsable);
+            
+            // Stocker le service de l'utilisateur
+            setUserServiceId(matchingPersonnel.serviceId);
+            
+            console.log('Mode personnel activé pour:', {
+              personnelId: matchingPersonnel.id,
+              email: userEmail,
+              responsable: isUserResponsable,
+              serviceId: matchingPersonnel.serviceId
+            });
+            
+            // Retourner les infos du personnel pour initialiser les filtres
+            return {
+              userService: firstUser.Service,
+              userGroupes: matchingPersonnel.groupes,
+              matchingPersonnel
+            };
+          } else {
+            setIsRestrictedUser(false);
+            setIsResponsable(false);
+            setUserServiceId(null);
+          }
+        } else {
+          setIsRestrictedUser(false);
+          setIsResponsable(false);
+          setUserServiceId(null);
+        }
+        
+        return {
+          userService: firstUser.Service,
+          userGroupes: null,
+          matchingPersonnel: null
+        };
+      } else {
+        setIsRestrictedUser(false);
+        setIsResponsable(false);
+        setUserServiceId(null);
+        return {
+          userService: null,
+          userGroupes: null,
+          matchingPersonnel: null
+        };
+      }
+    } catch (error) {
+      console.error('Erreur lors de l\'initialisation des infos utilisateur:', error);
+      setIsRestrictedUser(false);
+      setIsResponsable(false);
+      setUserServiceId(null);
+      return {
+        userService: null,
+        userGroupes: null,
+        matchingPersonnel: null
+      };
+    }
+  };
+
+  // Fonction pour initialiser le service par défaut
+  const initializeDefaultService = async (servicesData, userService) => {
+    try {
+      if (userService) {
+        // Vérifier si ce service existe dans la liste des services
+        const matchingService = servicesData.find(s => s.libelle === userService);
+        
+        if (matchingService) {
+          return matchingService.id;
+        } else {
+          return servicesData.length > 0 ? servicesData[0].id : null;
+        }
+      } else {
+        return servicesData.length > 0 ? servicesData[0].id : null;
+      }
+    } catch (error) {
+      console.error('Erreur lors de l\'initialisation du service par défaut:', error);
+      return servicesData.length > 0 ? servicesData[0].id : null;
+    }
+  };
+
+  // Fonction pour initialiser le groupe par défaut
+  const initializeDefaultGroupe = (groupesData, userGroupes) => {
+    try {
+      if (userGroupes && Array.isArray(userGroupes) && userGroupes.length > 0) {
+        // Prendre le premier groupe de l'utilisateur
+        const firstUserGroupeId = userGroupes[0];
+        
+        // Vérifier si ce groupe existe dans la liste des groupes
+        const matchingGroupe = groupesData.find(g => g.id === firstUserGroupeId);
+        
+        if (matchingGroupe) {
+          return matchingGroupe.id;
+        } else {
+          return groupesData.length > 0 ? groupesData[0].id : null;
+        }
+      } else {
+        return groupesData.length > 0 ? groupesData[0].id : null;
+      }
+    } catch (error) {
+      console.error('Erreur lors de l\'initialisation du groupe par défaut:', error);
+      return groupesData.length > 0 ? groupesData[0].id : null;
+    }
+  };
+
   // Chargement des données depuis Grist
   useEffect(() => {
     const loadData = async () => {
       try {
         setLoading(true);
+        setIsInitialized(false);
         
-        console.log('📊 Chargement des données Grist... (trigger:', refreshTrigger, ')');
+        // Charger les services
+        const servicesData = await gristAPI.getData('Services');
         
-        // Charger les personnels
+        const servicesList = servicesData.map(s => ({
+          id: s.id,
+          libelle: s.Libelle
+        }));
+        setServices(servicesList);
+        
+        // Charger les groupes
+        const groupesData = await gristAPI.getData('Groupes');
+        
+        const groupesList = groupesData.map(g => ({
+          id: g.id,
+          nom: g.Nom
+        }));
+        setGroupes(groupesList);
+        
+        // Charger TOUS les personnels avec la colonne Responsable
         const personnelsData = await gristAPI.getData('Personnels');
-        console.log('👥 Personnels chargés:', personnelsData);
         
-        const personnelsList = personnelsData.map(p => ({
+        const allPersonnelsList = personnelsData.map(p => ({
           id: p.id,
           name: p.PrenomNom || `${p.Prenom} ${p.Nom}`,
           nom: p.Nom,
           prenom: p.Prenom,
-          email: p.Email
+          email: p.Email,
+          serviceId: p.Service,
+          groupes: typeof p.Groupes === 'string' ? JSON.parse(p.Groupes) : (Array.isArray(p.Groupes) ? p.Groupes : []),
+          responsable: p.Responsable
         }));
-        setPersonnels(personnelsList);
+        setAllPersonnels(allPersonnelsList);
+        
+        // Initialiser les informations utilisateur ET récupérer les infos de filtrage
+        const userInfos = await initializeUserInfo(allPersonnelsList);
+        
+        // Initialiser les filtres par défaut
+        const defaultServiceId = await initializeDefaultService(servicesList, userInfos.userService);
+        setSelectedService(defaultServiceId);
+        
+        // Initialiser le groupe par défaut
+        const defaultGroupeId = initializeDefaultGroupe(groupesList, userInfos.userGroupes);
+        setSelectedGroupe(defaultGroupeId);
+        
+        // Filtrer les personnels selon le mode par défaut (services)
+        const filteredPersonnels = filterPersonnelsByService(defaultServiceId);
+        setPersonnels(filteredPersonnels);
         
         // Charger les types de congés
         const typesData = await gristAPI.getData('Type_Conges');
-        console.log('📋 Types de congés chargés:', typesData);
         setTypeConges(typesData);
         
         // Charger les congés existants
         const congesData = await gristAPI.getData('Conges');
-        console.log('🗓️ Congés chargés:', congesData);
         setConges(congesData);
         
         // Initialiser les cases cochées avec les congés existants
@@ -274,13 +503,20 @@ const Component = () => {
           }
         });
         
-        console.log('🎯 Cases cochées finales:', newCheckedCells);
+        // Définir l'état initial et actuel
+        const initialState = JSON.parse(JSON.stringify(newCheckedCells));
+        
         setCheckedCells(newCheckedCells);
-        // Sauvegarder l'état initial pour détecter les changements
-        setInitialCheckedCells(JSON.parse(JSON.stringify(newCheckedCells)));
+        setInitialCheckedCells(initialState);
+        
+        // Réinitialiser l'état des changements
+        setHasUnsavedChanges(false);
+        
+        // Marquer l'initialisation comme terminée
+        setIsInitialized(true);
         
       } catch (error) {
-        console.error('❌ Erreur lors du chargement des données:', error);
+        console.error('Erreur lors du chargement des données:', error);
       } finally {
         setLoading(false);
       }
@@ -289,7 +525,36 @@ const Component = () => {
     loadData();
   }, [currentYear, refreshTrigger]);
 
-  // Styles CSS inline
+  // Effect pour filtrer les personnels quand le filtre change
+  useEffect(() => {
+    if (allPersonnels.length > 0) {
+      const filteredPersonnels = filterPersonnels();
+      setPersonnels(filteredPersonnels);
+    }
+  }, [filterMode, selectedService, selectedGroupe, allPersonnels]);
+
+  // Effect pour détecter les changements - seulement après initialisation
+  useEffect(() => {
+    // Ne vérifier que si l'initialisation est terminée
+    if (!isInitialized) {
+      return;
+    }
+    
+    // Ne vérifier que si les deux états sont initialisés
+    if (Object.keys(initialCheckedCells).length === 0 || Object.keys(checkedCells).length === 0) {
+      return;
+    }
+    
+    const changes = getChanges();
+    const detectedChanges = changes.toAdd.length > 0 || changes.toRemove.length > 0;
+    
+    // Mise à jour seulement si nécessaire
+    if (detectedChanges !== hasUnsavedChanges) {
+      setHasUnsavedChanges(detectedChanges);
+    }
+  }, [checkedCells, initialCheckedCells, conges, isInitialized]);
+
+  // MODIFIÉ : Styles CSS inline avec nouvelle structure d'en-tête
   const styles = {
     container: {
       width: '100%',
@@ -297,19 +562,24 @@ const Component = () => {
       minHeight: '100vh',
       fontFamily: 'Arial, sans-serif'
     },
-    header: {
+    headerContainer: {
       position: 'sticky',
-      top: '-2vw',
+      top: 0,
       zIndex: 1000,
       backgroundColor: '#f9fafb',
+      borderBottom: '1px solid #e5e7eb',
+      boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+    },
+    headerRow: {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      padding: '4px 16px', // Réduit de 16px à 4px (divisé par 4)
+      padding: '8px 16px',
       gap: '16px',
-      borderBottom: '1px solid #e5e7eb',
-      boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
       flexWrap: 'wrap'
+    },
+    firstRow: {
+      borderBottom: '1px solid #e5e7eb'
     },
     content: {
       padding: '16px'
@@ -326,6 +596,11 @@ const Component = () => {
     buttonHover: {
       backgroundColor: '#2563eb'
     },
+    yearSelector: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px'
+    },
     yearInput: {
       padding: '8px 12px',
       border: '1px solid #d1d5db',
@@ -336,12 +611,47 @@ const Component = () => {
       width: '140px',
       minWidth: '140px'
     },
-    typeSelect: {
+    select: {
       padding: '8px 12px',
       border: '1px solid #d1d5db',
       borderRadius: '8px',
       fontSize: '14px',
       backgroundColor: 'white'
+    },
+    filterSelect: {
+      padding: '8px 12px',
+      border: '1px solid #d1d5db',
+      borderRadius: '8px',
+      fontSize: '14px',
+      backgroundColor: 'white',
+      minWidth: '180px'
+    },
+    // Styles pour le switch
+    switchContainer: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      padding: '4px',
+      backgroundColor: '#f3f4f6',
+      borderRadius: '8px',
+      border: '1px solid #d1d5db'
+    },
+    switchButton: {
+      padding: '6px 12px',
+      borderRadius: '6px',
+      border: 'none',
+      cursor: 'pointer',
+      fontSize: '12px',
+      fontWeight: '500',
+      transition: 'all 0.2s'
+    },
+    switchButtonActive: {
+      backgroundColor: '#3b82f6',
+      color: 'white'
+    },
+    switchButtonInactive: {
+      backgroundColor: 'transparent',
+      color: '#6b7280'
     },
     saveButton: {
       padding: '8px 16px',
@@ -353,15 +663,12 @@ const Component = () => {
       fontWeight: 'bold',
       fontSize: '14px'
     },
-    refreshButton: {
-      padding: '8px 16px',
-      backgroundColor: '#f59e0b',
-      color: 'white',
-      borderRadius: '8px',
-      border: 'none',
-      cursor: 'pointer',
-      fontWeight: 'bold',
-      fontSize: '14px'
+    modeBadge: {
+      padding: '4px 8px',
+      borderRadius: '6px',
+      fontSize: '12px',
+      fontWeight: '500',
+      border: '1px solid'
     },
     scrollContainer: {
       overflowX: 'auto'
@@ -450,7 +757,6 @@ const Component = () => {
     },
     personCellHalf: {
       flex: 1,
-      cursor: 'pointer',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -464,6 +770,11 @@ const Component = () => {
     personCellUnchecked: {
       backgroundColor: '#f9fafb',
       color: 'transparent'
+    },
+    // Styles pour les cellules non modifiables
+    personCellDisabled: {
+      cursor: 'not-allowed',
+      opacity: 0.5
     },
     loading: {
       display: 'flex',
@@ -575,9 +886,8 @@ const Component = () => {
     setCurrentYear(prev => prev + 1);
   };
 
-  // Fonction pour recharger les données
+  // Fonction pour recharger les données (sans bouton explicite)
   const refreshData = () => {
-    console.log('🔄 Actualisation demandée...');
     setRefreshTrigger(prev => prev + 1);
   };
 
@@ -586,27 +896,45 @@ const Component = () => {
     return checkedCells[personId]?.[monthIndex]?.[day]?.[period] || { checked: false, typeId: null };
   };
 
+  // setCellState sans conflit avec l'effect de détection
   const setCellState = (personId, monthIndex, day, period, checked, typeId = null) => {
-    setCheckedCells(prev => ({
-      ...prev,
-      [personId]: {
-        ...prev[personId],
-        [monthIndex]: {
-          ...prev[personId]?.[monthIndex],
-          [day]: {
-            ...prev[personId]?.[monthIndex]?.[day],
-            [period]: {
-              checked: checked,
-              typeId: checked ? (typeId || selectedTypeConge) : null
+    // VÉRIFICATION : L'utilisateur peut-il modifier ce personnel ?
+    if (!canModifyPersonnel(personId)) {
+      return;
+    }
+    
+    // Activer immédiatement le bouton avant la mise à jour
+    setHasUnsavedChanges(true);
+    
+    setCheckedCells(prev => {
+      const newState = {
+        ...prev,
+        [personId]: {
+          ...prev[personId],
+          [monthIndex]: {
+            ...prev[personId]?.[monthIndex],
+            [day]: {
+              ...prev[personId]?.[monthIndex]?.[day],
+              [period]: {
+                checked: checked,
+                typeId: checked ? (typeId || selectedTypeConge) : null
+              }
             }
           }
         }
-      }
-    }));
+      };
+      
+      return newState;
+    });
   };
 
   const handleMouseDown = (personId, monthIndex, day, period, e) => {
     e.preventDefault();
+    
+    // VÉRIFICATION : L'utilisateur peut-il modifier ce personnel ?
+    if (!canModifyPersonnel(personId)) {
+      return;
+    }
     
     setIsSelecting(true);
     setCurrentSelectionPerson(personId);
@@ -622,7 +950,8 @@ const Component = () => {
   const handleMouseEnter = (personId, monthIndex, day, period) => {
     if (isSelecting && 
         personId === currentSelectionPerson && 
-        monthIndex === currentSelectionMonth) {
+        monthIndex === currentSelectionMonth &&
+        canModifyPersonnel(personId)) {
       setCellState(personId, monthIndex, day, period, selectionState, selectedTypeConge);
     }
   };
@@ -652,6 +981,34 @@ const Component = () => {
         return;
       }
       
+      // VÉRIFICATION : Vérifier les permissions pour chaque modification
+      if (isRestrictedUser) {
+        // Vérifier les ajouts
+        for (const newConge of changes.toAdd) {
+          if (!canModifyPersonnel(newConge.Personnel)) {
+            if (isResponsable) {
+              alert('🚫 Erreur : Vous ne pouvez modifier que vos propres congés et ceux de votre équipe.');
+            } else {
+              alert('🚫 Erreur : Vous ne pouvez modifier que vos propres congés.');
+            }
+            return;
+          }
+        }
+        
+        // Vérifier les suppressions
+        for (const congeId of changes.toRemove) {
+          const congeToDelete = conges.find(c => c.id === congeId);
+          if (congeToDelete && !canModifyPersonnel(congeToDelete.Personnel)) {
+            if (isResponsable) {
+              alert('🚫 Erreur : Vous ne pouvez supprimer que vos propres congés et ceux de votre équipe.');
+            } else {
+              alert('🚫 Erreur : Vous ne pouvez supprimer que vos propres congés.');
+            }
+            return;
+          }
+        }
+      }
+      
       // Supprimer les congés décochés
       for (const congeId of changes.toRemove) {
         await gristAPI.deleteRecord('Conges', congeId);
@@ -664,21 +1021,19 @@ const Component = () => {
       
       alert('✅ Modifications sauvegardées avec succès !');
       
+      // Désactiver le bouton
+      setHasUnsavedChanges(false);
+      
       // Recharger les données pour synchroniser l'affichage
       refreshData();
       
     } catch (error) {
-      console.error('❌ Erreur lors de la sauvegarde:', error);
+      console.error('Erreur lors de la sauvegarde:', error);
       alert('Erreur lors de la sauvegarde: ' + error.message);
+    } finally {
+      setLoading(false);
     }
   };
-
-  // Vérifier s'il y a des modifications en attente
-  const hasChanges = useMemo(() => {
-    if (Object.keys(initialCheckedCells).length === 0) return false;
-    const changes = getChanges();
-    return changes.toAdd.length > 0 || changes.toRemove.length > 0;
-  }, [checkedCells, initialCheckedCells]);
 
   if (loading) {
     return (
@@ -691,72 +1046,137 @@ const Component = () => {
 
   return (
     <div style={styles.container}>
-      {/* En-tête avec navigation */}
-      <div style={styles.header}>
-        <button 
-          style={styles.button}
-          onClick={goToPreviousYear}
-          onMouseOver={(e) => e.target.style.backgroundColor = styles.buttonHover.backgroundColor}
-          onMouseOut={(e) => e.target.style.backgroundColor = styles.button.backgroundColor}
-        >
-          ◀
-        </button>
+      {/* MODIFIÉ : En-tête avec structure sur deux lignes */}
+      <div style={styles.headerContainer}>
+        {/* Première ligne : Année, Type de congés, Bouton Sauvegarder */}
+        <div style={{...styles.headerRow, ...styles.firstRow}}>
+          {/* Sélecteur d'année */}
+          <div style={styles.yearSelector}>
+            <button 
+              style={styles.button}
+              onClick={goToPreviousYear}
+              onMouseOver={(e) => e.target.style.backgroundColor = styles.buttonHover.backgroundColor}
+              onMouseOut={(e) => e.target.style.backgroundColor = styles.button.backgroundColor}
+            >
+              ◀
+            </button>
+            
+            <input
+              type="text"
+              value={`${currentYear}-${currentYear + 1}`}
+              onChange={(e) => {
+                const match = e.target.value.match(/^(\d{4})-(\d{4})$/);
+                if (match) {
+                  const startYear = parseInt(match[1]);
+                  if (!isNaN(startYear) && startYear > 1900 && startYear < 3000) {
+                    setCurrentYear(startYear);
+                  }
+                }
+              }}
+              style={styles.yearInput}
+              placeholder="2024-2025"
+            />
+            
+            <button 
+              style={styles.button}
+              onClick={goToNextYear}
+              onMouseOver={(e) => e.target.style.backgroundColor = styles.buttonHover.backgroundColor}
+              onMouseOut={(e) => e.target.style.backgroundColor = styles.button.backgroundColor}
+            >
+              ▶
+            </button>
+          </div>
+          
+          {/* Sélecteur de type de congé */}
+          <select 
+            value={selectedTypeConge} 
+            onChange={(e) => setSelectedTypeConge(parseInt(e.target.value))}
+            style={styles.select}
+          >
+            {typeConges.map(type => (
+              <option key={type.id} value={type.id}>
+                {type.Code} - {type.Libelle}
+              </option>
+            ))}
+          </select>
+          
+          {/* Bouton Sauvegarder */}
+          <button 
+            style={{
+              ...styles.saveButton,
+              backgroundColor: hasUnsavedChanges ? '#10b981' : '#9ca3af'
+            }}
+            onClick={saveConges}
+            disabled={loading || !hasUnsavedChanges}
+            title={hasUnsavedChanges ? 'Cliquez pour sauvegarder les modifications' : 'Aucune modification détectée'}
+          >
+            💾 Sauvegarder
+          </button>
+        </div>
         
-        <input
-          type="text"
-          value={`${currentYear}-${currentYear + 1}`}
-          onChange={(e) => {
-            const match = e.target.value.match(/^(\d{4})-(\d{4})$/);
-            if (match) {
-              const startYear = parseInt(match[1]);
-              if (!isNaN(startYear) && startYear > 1900 && startYear < 3000) {
-                setCurrentYear(startYear);
-              }
-            }
-          }}
-          style={styles.yearInput}
-          placeholder="2024-2025"
-        />
-        
-        <button 
-          style={styles.button}
-          onClick={goToNextYear}
-          onMouseOver={(e) => e.target.style.backgroundColor = styles.buttonHover.backgroundColor}
-          onMouseOut={(e) => e.target.style.backgroundColor = styles.button.backgroundColor}
-        >
-          ▶
-        </button>
-        
-        <select 
-          value={selectedTypeConge} 
-          onChange={(e) => setSelectedTypeConge(parseInt(e.target.value))}
-          style={styles.typeSelect}
-        >
-          {typeConges.map(type => (
-            <option key={type.id} value={type.id}>
-              {type.Code} - {type.Libelle}
-            </option>
-          ))}
-        </select>
-        
-        <button 
-          style={styles.refreshButton}
-          onClick={refreshData}
-          disabled={loading}
-        >
-          🔄 Actualiser
-        </button>
-        
-        <button 
-          style={{
-            ...styles.saveButton,
-            backgroundColor: hasChanges ? '#10b981' : '#9ca3af'
-          }}
-          onClick={saveConges}
-          disabled={loading || !hasChanges}
-        >
-          💾 Sauvegarder
-        </button>
+        {/* Deuxième ligne : Switch, Sélecteur Services/Groupes, Badge Mode */}
+        <div style={styles.headerRow}>
+          {/* Switch Services/Groupes */}
+          <div style={styles.switchContainer}>
+            <button
+              style={{
+                ...styles.switchButton,
+                ...(filterMode === 'services' ? styles.switchButtonActive : styles.switchButtonInactive)
+              }}
+              onClick={() => setFilterMode('services')}
+            >
+              🏢 Services
+            </button>
+            <button
+              style={{
+                ...styles.switchButton,
+                ...(filterMode === 'groupes' ? styles.switchButtonActive : styles.switchButtonInactive)
+              }}
+              onClick={() => setFilterMode('groupes')}
+            >
+              👥 Groupes
+            </button>
+          </div>
+          
+          {/* Sélecteur conditionnel Services/Groupes */}
+          {filterMode === 'services' ? (
+            <select 
+              value={selectedService || ''} 
+              onChange={(e) => setSelectedService(parseInt(e.target.value))}
+              style={styles.filterSelect}
+            >
+              {services.map(service => (
+                <option key={service.id} value={service.id}>
+                  🏢 {service.libelle}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <select 
+              value={selectedGroupe || ''} 
+              onChange={(e) => setSelectedGroupe(parseInt(e.target.value))}
+              style={styles.filterSelect}
+            >
+              {groupes.map(groupe => (
+                <option key={groupe.id} value={groupe.id}>
+                  👥 {groupe.nom}
+                </option>
+              ))}
+            </select>
+          )}
+          
+          {/* Badge Mode personnel/responsable */}
+          {isRestrictedUser && (
+            <div style={{
+              ...styles.modeBadge,
+              backgroundColor: isResponsable ? '#dcfce7' : '#fef3c7',
+              color: isResponsable ? '#166534' : '#92400e',
+              borderColor: isResponsable ? '#22c55e' : '#f59e0b'
+            }}>
+              {isResponsable ? '👥 Mode responsable' : '🔒 Mode personnel'}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Contenu principal */}
@@ -849,93 +1269,116 @@ const Component = () => {
                   })}
 
                   {/* Lignes des personnes */}
-                  {personnels.map((person) => (
-                    <React.Fragment key={person.id}>
-                      <div style={styles.personName}>
-                        {formatPersonName(person.name)}
-                      </div>
-                      
-                      {month.days.map((dayInfo) => {
-                        const morningState = getCellState(person.id, month.index, dayInfo.number, 'morning');
-                        const afternoonState = getCellState(person.id, month.index, dayInfo.number, 'afternoon');
+                  {personnels.map((person) => {
+                    // Vérifier si cette personne peut être modifiée
+                    const canModifyThisPerson = canModifyPersonnel(person.id);
+                    
+                    return (
+                      <React.Fragment key={person.id}>
+                        <div style={{
+                          ...styles.personName,
+                          // Style différent pour l'utilisateur connecté
+                          fontWeight: person.id === userPersonnelId ? 'bold' : '500',
+                          color: person.id === userPersonnelId ? '#059669' : 
+                                (canModifyThisPerson && isRestrictedUser ? '#2563eb' : '#374151')
+                        }}>
+                          {person.id === userPersonnelId && '👤 '}
+                          {person.id !== userPersonnelId && canModifyThisPerson && isRestrictedUser && '👥 '}
+                          {formatPersonName(person.name)}
+                        </div>
                         
-                        // Obtenir les infos de type pour chaque période
-                        const morningTypeInfo = morningState.checked ? getTypeCongeInfo(morningState.typeId) : null;
-                        const afternoonTypeInfo = afternoonState.checked ? getTypeCongeInfo(afternoonState.typeId) : null;
-                        
-                        return (
-                          <div key={`${person.id}-${dayInfo.number}`} style={styles.personCell}>
-                            {/* Matinée */}
-                            <div 
-                              style={{
-                                ...styles.personCellHalf,
-                                ...styles.personCellHalfBorder,
-                                backgroundColor: morningState.checked ? morningTypeInfo.couleur : '#f9fafb',
-                                color: morningState.checked ? '#ffffff' : 'transparent',
-                                userSelect: 'none'
-                              }}
-                              title={`${person.name} - Matinée du ${dayInfo.number} ${month.name} ${morningState.checked ? `(${morningTypeInfo.libelle})` : '(Non cochée)'}`}
-                              onMouseDown={(e) => handleMouseDown(person.id, month.index, dayInfo.number, 'morning', e)}
-                              onMouseEnter={() => handleMouseEnter(person.id, month.index, dayInfo.number, 'morning')}
-                              onMouseOver={(e) => {
-                                if (!morningState.checked) {
-                                  const selectedTypeInfo = getTypeCongeInfo(selectedTypeConge);
-                                  e.target.style.backgroundColor = selectedTypeInfo.couleur;
-                                  e.target.style.opacity = '0.5';
-                                } else {
-                                  e.target.style.opacity = '0.8';
-                                }
-                              }}
-                              onMouseOut={(e) => {
-                                if (!morningState.checked) {
-                                  e.target.style.backgroundColor = '#f9fafb';
-                                  e.target.style.opacity = '1';
-                                } else {
-                                  e.target.style.backgroundColor = morningTypeInfo.couleur;
-                                  e.target.style.opacity = '1';
-                                }
-                              }}
-                            >
-                              {morningState.checked ? morningTypeInfo.code : ''}
+                        {month.days.map((dayInfo) => {
+                          const morningState = getCellState(person.id, month.index, dayInfo.number, 'morning');
+                          const afternoonState = getCellState(person.id, month.index, dayInfo.number, 'afternoon');
+                          
+                          // Obtenir les infos de type pour chaque période
+                          const morningTypeInfo = morningState.checked ? getTypeCongeInfo(morningState.typeId) : null;
+                          const afternoonTypeInfo = afternoonState.checked ? getTypeCongeInfo(afternoonState.typeId) : null;
+                          
+                          return (
+                            <div key={`${person.id}-${dayInfo.number}`} style={styles.personCell}>
+                              {/* Matinée */}
+                              <div 
+                                style={{
+                                  ...styles.personCellHalf,
+                                  ...styles.personCellHalfBorder,
+                                  backgroundColor: morningState.checked ? morningTypeInfo.couleur : '#f9fafb',
+                                  color: morningState.checked ? '#ffffff' : 'transparent',
+                                  userSelect: 'none',
+                                  // Styles pour les cellules non modifiables
+                                  cursor: canModifyThisPerson ? 'pointer' : 'not-allowed',
+                                  opacity: canModifyThisPerson ? 1 : 0.5
+                                }}
+                                title={`${person.name} - Matinée du ${dayInfo.number} ${month.name} ${morningState.checked ? `(${morningTypeInfo.libelle})` : '(Non cochée)'}${
+                                  !canModifyThisPerson ? ' - Modification non autorisée' : ''
+                                }`}
+                                onMouseDown={canModifyThisPerson ? (e) => handleMouseDown(person.id, month.index, dayInfo.number, 'morning', e) : undefined}
+                                onMouseEnter={canModifyThisPerson ? () => handleMouseEnter(person.id, month.index, dayInfo.number, 'morning') : undefined}
+                                onMouseOver={canModifyThisPerson ? (e) => {
+                                  if (!morningState.checked) {
+                                    const selectedTypeInfo = getTypeCongeInfo(selectedTypeConge);
+                                    e.target.style.backgroundColor = selectedTypeInfo.couleur;
+                                    e.target.style.opacity = '0.5';
+                                  } else {
+                                    e.target.style.opacity = '0.8';
+                                  }
+                                } : undefined}
+                                onMouseOut={canModifyThisPerson ? (e) => {
+                                  if (!morningState.checked) {
+                                    e.target.style.backgroundColor = '#f9fafb';
+                                    e.target.style.opacity = '1';
+                                  } else {
+                                    e.target.style.backgroundColor = morningTypeInfo.couleur;
+                                    e.target.style.opacity = '1';
+                                  }
+                                } : undefined}
+                              >
+                                {morningState.checked ? morningTypeInfo.code : ''}
+                              </div>
+                              
+                              {/* Après-midi */}
+                              <div 
+                                style={{
+                                  ...styles.personCellHalf,
+                                  backgroundColor: afternoonState.checked ? afternoonTypeInfo.couleur : '#f9fafb',
+                                  color: afternoonState.checked ? '#ffffff' : 'transparent',
+                                  userSelect: 'none',
+                                  // Styles pour les cellules non modifiables
+                                  cursor: canModifyThisPerson ? 'pointer' : 'not-allowed',
+                                  opacity: canModifyThisPerson ? 1 : 0.5
+                                }}
+                                title={`${person.name} - Après-midi du ${dayInfo.number} ${month.name} ${afternoonState.checked ? `(${afternoonTypeInfo.libelle})` : '(Non cochée)'}${
+                                  !canModifyThisPerson ? ' - Modification non autorisée' : ''
+                                }`}
+                                onMouseDown={canModifyThisPerson ? (e) => handleMouseDown(person.id, month.index, dayInfo.number, 'afternoon', e) : undefined}
+                                onMouseEnter={canModifyThisPerson ? () => handleMouseEnter(person.id, month.index, dayInfo.number, 'afternoon') : undefined}
+                                onMouseOver={canModifyThisPerson ? (e) => {
+                                  if (!afternoonState.checked) {
+                                    const selectedTypeInfo = getTypeCongeInfo(selectedTypeConge);
+                                    e.target.style.backgroundColor = selectedTypeInfo.couleur;
+                                    e.target.style.opacity = '0.5';
+                                  } else {
+                                    e.target.style.opacity = '0.8';
+                                  }
+                                } : undefined}
+                                onMouseOut={canModifyThisPerson ? (e) => {
+                                  if (!afternoonState.checked) {
+                                    e.target.style.backgroundColor = '#f9fafb';
+                                    e.target.style.opacity = '1';
+                                  } else {
+                                    e.target.style.backgroundColor = afternoonTypeInfo.couleur;
+                                    e.target.style.opacity = '1';
+                                  }
+                                } : undefined}
+                              >
+                                {afternoonState.checked ? afternoonTypeInfo.code : ''}
+                              </div>
                             </div>
-                            
-                            {/* Après-midi */}
-                            <div 
-                              style={{
-                                ...styles.personCellHalf,
-                                backgroundColor: afternoonState.checked ? afternoonTypeInfo.couleur : '#f9fafb',
-                                color: afternoonState.checked ? '#ffffff' : 'transparent',
-                                userSelect: 'none'
-                              }}
-                              title={`${person.name} - Après-midi du ${dayInfo.number} ${month.name} ${afternoonState.checked ? `(${afternoonTypeInfo.libelle})` : '(Non cochée)'}`}
-                              onMouseDown={(e) => handleMouseDown(person.id, month.index, dayInfo.number, 'afternoon', e)}
-                              onMouseEnter={() => handleMouseEnter(person.id, month.index, dayInfo.number, 'afternoon')}
-                              onMouseOver={(e) => {
-                                if (!afternoonState.checked) {
-                                  const selectedTypeInfo = getTypeCongeInfo(selectedTypeConge);
-                                  e.target.style.backgroundColor = selectedTypeInfo.couleur;
-                                  e.target.style.opacity = '0.5';
-                                } else {
-                                  e.target.style.opacity = '0.8';
-                                }
-                              }}
-                              onMouseOut={(e) => {
-                                if (!afternoonState.checked) {
-                                  e.target.style.backgroundColor = '#f9fafb';
-                                  e.target.style.opacity = '1';
-                                } else {
-                                  e.target.style.backgroundColor = afternoonTypeInfo.couleur;
-                                  e.target.style.opacity = '1';
-                                }
-                              }}
-                            >
-                              {afternoonState.checked ? afternoonTypeInfo.code : ''}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </React.Fragment>
-                  ))}
+                          );
+                        })}
+                      </React.Fragment>
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -955,12 +1398,20 @@ const Component = () => {
           </h4>
           <ul style={{fontSize: '14px', color: '#6b7280', lineHeight: '1.6'}}>
             <li>📊 <strong>Chargement automatique:</strong> Les congés existants sont affichés au démarrage</li>
+            <li>⚙️ <strong>Filtres:</strong> Utilisez le switch Services/Groupes pour changer le mode de filtrage</li>
+            <li>🏢 <strong>Filtre par service:</strong> Sélectionnez un service pour n'afficher que ses personnels</li>
+            <li>👥 <strong>Filtre par groupe:</strong> Sélectionnez un groupe pour n'afficher que ses membres</li>
             <li>🎨 <strong>Types de congés:</strong> Chaque type a son code et sa couleur (C=vert, M=bleu, etc.)</li>
             <li>🎯 <strong>Sélection:</strong> Choisissez le type de congé avant la saisie</li>
             <li>🖱️ <strong>Interaction:</strong> Cliquez sur M (Matinée) ou A (Après-midi) pour marquer les congés</li>
             <li>✨ <strong>Aperçu:</strong> En survolant une case, vous voyez la couleur du type sélectionné</li>
-            <li>🔄 <strong>Actualisation:</strong> Rechargement automatique après sauvegarde</li>
-            <li>💾 <strong>Sauvegarde:</strong> Le bouton se colore quand il y a des modifications à sauver</li>
+            <li>💾 <strong>Sauvegarde:</strong> Le bouton se colore quand il y a des modifications</li>
+            {isRestrictedUser && !isResponsable && (
+              <li>🔒 <strong>Mode personnel:</strong> Vous ne pouvez modifier que vos propres congés</li>
+            )}
+            {isRestrictedUser && isResponsable && (
+              <li>👥 <strong>Mode responsable:</strong> Vous pouvez modifier vos congés et ceux de votre équipe</li>
+            )}
           </ul>
         </div>
       </div>
