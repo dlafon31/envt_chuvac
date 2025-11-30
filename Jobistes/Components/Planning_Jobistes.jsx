@@ -132,7 +132,7 @@ const Component = () => {
 
     return {
       day: selectedDay,
-      dayName: formatDayName(selectedDay),
+      dayName: useShortDayNames ? formatDayNameShort(selectedDay) : formatDayName(selectedDay),
       dayDate: formatDate(selectedDay),
       startTime,
       endTime,
@@ -214,14 +214,54 @@ const Component = () => {
     return date.toLocaleDateString('fr-FR', { weekday: 'long' });
   };
 
+  // Fonction pour obtenir le nom du jour en format court (3 lettres)
+  const formatDayNameShort = (date) => {
+    const dayNames = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
+    return dayNames[date.getDay()];
+  };
+
+  // Hook pour détecter la largeur des cellules et choisir le format approprié
+  const [useShortDayNames, setUseShortDayNames] = useState(false);
+  
+  useEffect(() => {
+    const checkCellWidth = () => {
+      if (scrollContainerRef.current) {
+        const table = scrollContainerRef.current.querySelector('table');
+        if (table) {
+          const tableWidth = table.offsetWidth;
+          const timeColumnWidth = 80;
+          const availableWidth = tableWidth - timeColumnWidth;
+          const cellWidth = availableWidth / 7;
+          
+          // Si la largeur de cellule est inférieure à 100px, utiliser les noms courts
+          setUseShortDayNames(cellWidth < 100);
+        }
+      }
+    };
+
+    // Vérifier au montage et lors des redimensionnements
+    checkCellWidth();
+    window.addEventListener('resize', checkCellWidth);
+    
+    // Petit délai pour s'assurer que le DOM est rendu
+    const timeout = setTimeout(checkCellWidth, 100);
+
+    return () => {
+      window.removeEventListener('resize', checkCellWidth);
+      clearTimeout(timeout);
+    };
+  }, [currentWeek]);
+
   const styles = {
     container: {
       width: '100%',
-      height: '100vh',
+      height: '100%', // S'adapter à la zone d'affichage GRIST au lieu de 100vh
+      maxHeight: '100%', // Limiter la hauteur maximale
       display: 'flex',
       flexDirection: 'column',
       fontFamily: 'Arial, sans-serif',
-      backgroundColor: '#f5f5f5'
+      backgroundColor: '#f5f5f5',
+      overflow: 'hidden' // Empêcher tout débordement du container principal
     },
     header: {
       padding: '1rem',
@@ -231,12 +271,8 @@ const Component = () => {
       justifyContent: 'space-between',
       alignItems: 'center',
       flexWrap: 'wrap',
-      gap: '1rem'
-    },
-    headerTitle: {
-      fontSize: '1.5rem',
-      fontWeight: 'bold',
-      color: '#333'
+      gap: '1rem',
+      flexShrink: 0 // Empêcher la compression de l'en-tête
     },
     navigationControls: {
       display: 'flex',
@@ -272,19 +308,20 @@ const Component = () => {
       flex: 1,
       position: 'relative',
       overflow: 'hidden',
-      backgroundColor: '#fff'
+      backgroundColor: '#fff',
+      minHeight: 0 // Important pour permettre au flex child de se réduire
     },
     scrollContainer: {
       width: '100%',
       height: '100%',
-      overflow: 'auto',
-      position: 'relative'
+      overflow: 'auto'
     },
     table: {
-      minWidth: '800px',
+      width: '100%', // Utiliser 100% au lieu de minWidth fixe
+      height: 'auto',
       borderCollapse: 'separate',
       borderSpacing: 0,
-      position: 'relative'
+      tableLayout: 'fixed' // Layout fixe pour un contrôle précis des largeurs
     },
     headerRow: {
       zIndex: 10,
@@ -299,67 +336,66 @@ const Component = () => {
       borderRight: '2px solid #ddd',
       borderBottom: '1px solid #ddd',
       userSelect: 'none',
-      pointerEvents: 'none'
-    },
-    dayHeader: {
-      minWidth: '120px',
-      padding: '1rem 0.5rem',
-      textAlign: 'center',
-      backgroundColor: '#f8f9fa',
-      borderRight: '1px solid #ddd',
-      borderBottom: '1px solid #ddd',
-      fontWeight: 'bold',
-      fontSize: '0.9rem'
+      pointerEvents: 'none',
+      width: '80px', // Largeur fixe pour la colonne des heures
+      minWidth: '80px',
+      maxWidth: '80px'
     },
     dayHeaderSticky: {
-      minWidth: '120px',
-      padding: '1rem 0.5rem',
+      width: 'calc((100% - 80px) / 7)', // Répartition égale des 7 jours sur l'espace restant
+      padding: '1rem 0.25rem',
       textAlign: 'center',
       backgroundColor: '#f8f9fa',
       borderRight: '1px solid #ddd',
       borderBottom: '1px solid #ddd',
       fontWeight: 'bold',
-      fontSize: '0.9rem',
+      fontSize: '0.8rem',
       position: 'sticky',
       top: 0,
       zIndex: 20,
       userSelect: 'none',
-      pointerEvents: 'none'
+      pointerEvents: 'none',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis'
     },
     dayHeaderToday: {
-      minWidth: '120px',
-      padding: '1rem 0.5rem',
+      width: 'calc((100% - 80px) / 7)',
+      padding: '1rem 0.25rem',
       textAlign: 'center',
       backgroundColor: '#87CEEB',
       color: '#333',
       borderRight: '1px solid #ddd',
       borderBottom: '1px solid #ddd',
       fontWeight: 'bold',
-      fontSize: '0.9rem',
+      fontSize: '0.8rem',
       position: 'sticky',
       top: 0,
       zIndex: 20,
       userSelect: 'none',
-      pointerEvents: 'none'
+      pointerEvents: 'none',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis'
     },
     timeCell: {
       position: 'sticky',
       left: 0,
       zIndex: 15,
       width: '80px',
-      padding: '0.3rem 0.5rem',
+      minWidth: '80px',
+      maxWidth: '80px',
+      padding: '0.3rem 0.25rem',
       textAlign: 'center',
       verticalAlign: 'top',
       backgroundColor: '#f8f9fa',
       borderRight: '2px solid #ddd',
       borderBottom: '1px solid #eee',
-      fontSize: '0.8rem',
+      fontSize: '0.7rem',
       fontWeight: '500',
       userSelect: 'none',
       pointerEvents: 'none'
     },
     dataCell: {
-      minWidth: '120px',
+      width: 'calc((100% - 80px) / 7)',
       height: '40px',
       borderRight: '1px solid #eee',
       borderBottom: '1px solid #eee',
@@ -367,7 +403,8 @@ const Component = () => {
       backgroundColor: '#fff',
       cursor: 'pointer',
       transition: 'background-color 0.1s',
-      userSelect: 'none'
+      userSelect: 'none',
+      overflow: 'hidden' // Empêcher le débordement du contenu
     },
     dataCellHover: {
       backgroundColor: '#e3f2fd'
@@ -378,20 +415,23 @@ const Component = () => {
     },
     dayName: {
       textTransform: 'capitalize',
-      fontSize: '0.9rem',
-      color: '#333'
+      fontSize: '0.8rem',
+      color: '#333',
+      lineHeight: '1.1'
     },
     dayDate: {
-      fontSize: '0.8rem',
+      fontSize: '0.7rem',
       color: '#666',
-      marginTop: '0.2rem'
+      marginTop: '0.2rem',
+      lineHeight: '1.1'
     },
     weekInfo: {
-      fontSize: '0.9rem',
-      color: '#666'
+      fontSize: '1.1rem',
+      color: '#333',
+      fontWeight: '500'
     },
     actionBar: {
-      position: 'fixed',
+      position: 'absolute',
       bottom: 0,
       left: 0,
       right: 0,
@@ -428,11 +468,8 @@ const Component = () => {
     <div style={styles.container}>
       {/* En-tête avec navigation */}
       <div style={styles.header}>
-        <div>
-          <h2 style={styles.headerTitle}>Calendrier Hebdomadaire</h2>
-          <div style={styles.weekInfo}>
-            Semaine du {formatDate(weekDays[0])} au {formatDate(weekDays[6])}
-          </div>
+        <div style={styles.weekInfo}>
+          Semaine du {formatDate(weekDays[0])} au {formatDate(weekDays[6])}
         </div>
         <div style={styles.navigationControls}>
           <button 
@@ -442,7 +479,7 @@ const Component = () => {
             onClick={() => navigateWeek(-1)}
             title="Semaine précédente"
           >
-            &lt;
+            ‹
           </button>
           <button 
             style={styles.currentWeekButton}
@@ -458,7 +495,7 @@ const Component = () => {
             onClick={() => navigateWeek(1)}
             title="Semaine suivante"
           >
-            &gt;
+            ›
           </button>
         </div>
       </div>
@@ -479,7 +516,7 @@ const Component = () => {
                 {weekDays.map((day, index) => (
                   <th key={index} style={isToday(day) ? styles.dayHeaderToday : styles.dayHeaderSticky}>
                     <div style={styles.dayName}>
-                      {formatDayName(day)}
+                      {useShortDayNames ? formatDayNameShort(day) : formatDayName(day)}
                     </div>
                     <div style={styles.dayDate}>
                       {formatDate(day)}
@@ -545,7 +582,7 @@ const Component = () => {
             onClick={() => {
               const selectionInfo = getSelectionInfo();
               if (selectionInfo) {
-                const message = `Nouvel événement:\n\n` +
+                const message = `Nouvelle vacation:\n\n` +
                   `Jour: ${selectionInfo.dayName} ${selectionInfo.dayDate}\n` +
                   `Heure de début: ${selectionInfo.startTime}\n` +
                   `Heure de fin: ${selectionInfo.endTime}\n` +
@@ -553,14 +590,14 @@ const Component = () => {
                 
                 alert(message);
                 
-                // Ici vous pouvez ajouter votre logique de création d'événement
-                console.log('Informations de l\'événement:', selectionInfo);
+                // Ici vous pouvez ajouter votre logique de création de vacation
+                console.log('Informations de la vacation:', selectionInfo);
               }
             }}
             onMouseOver={(e) => e.target.style.backgroundColor = '#218838'}
             onMouseOut={(e) => e.target.style.backgroundColor = '#28a745'}
           >
-            Nouvel évènement
+            Nouvelle vacation
           </button>
           <button 
             style={{...styles.actionButton, ...styles.cancelButton}}
