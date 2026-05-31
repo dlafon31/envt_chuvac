@@ -1,5 +1,19 @@
 const Component = () => {
-  const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
+  // CORRIGÉ : Fonction pour déterminer l'année scolaire courante basée sur le 1er septembre
+  const getCurrentSchoolYear = () => {
+    const today = new Date();
+    const currentCalendarYear = today.getFullYear();
+    const september1st = new Date(currentCalendarYear, 8, 1); // 1er septembre de l'année civile actuelle
+    
+    // Si on est avant le 1er septembre, on est encore dans l'année scolaire précédente
+    if (today < september1st) {
+      return currentCalendarYear - 1;
+    } else {
+      return currentCalendarYear;
+    }
+  };
+
+  const [currentYear, setCurrentYear] = useState(getCurrentSchoolYear()); // MODIFIÉ : Utilise la fonction
   const [personnels, setPersonnels] = useState([]);
   const [allPersonnels, setAllPersonnels] = useState([]); // Tous les personnels
   const [services, setServices] = useState([]); // Liste des services
@@ -554,7 +568,7 @@ const Component = () => {
     }
   }, [checkedCells, initialCheckedCells, conges, isInitialized]);
 
-  // MODIFIÉ : Styles CSS inline avec nouvelle structure d'en-tête
+  // Styles CSS inline avec nouvelle structure d'en-tête
   const styles = {
     container: {
       width: '100%',
@@ -969,6 +983,121 @@ const Component = () => {
     return () => document.removeEventListener('mouseup', handleMouseUp);
   }, []);
 
+  // NOUVEAU : Fonction pour recharger les données en conservant les filtres
+  const reloadDataWithFilters = async (preservedFilterMode, preservedSelectedService, preservedSelectedGroupe) => {
+    try {
+      setIsInitialized(false);
+      
+      // Charger les services
+      const servicesData = await gristAPI.getData('Services');
+      
+      const servicesList = servicesData.map(s => ({
+        id: s.id,
+        libelle: s.Libelle
+      }));
+      setServices(servicesList);
+      
+      // Charger les groupes
+      const groupesData = await gristAPI.getData('Groupes');
+      
+      const groupesList = groupesData.map(g => ({
+        id: g.id,
+        nom: g.Nom
+      }));
+      setGroupes(groupesList);
+      
+      // Charger TOUS les personnels avec la colonne Responsable
+      const personnelsData = await gristAPI.getData('Personnels');
+      
+      const allPersonnelsList = personnelsData.map(p => ({
+        id: p.id,
+        name: p.PrenomNom || `${p.Prenom} ${p.Nom}`,
+        nom: p.Nom,
+        prenom: p.Prenom,
+        email: p.Email,
+        serviceId: p.Service,
+        groupes: typeof p.Groupes === 'string' ? JSON.parse(p.Groupes) : (Array.isArray(p.Groupes) ? p.Groupes : []),
+        responsable: p.Responsable
+      }));
+      setAllPersonnels(allPersonnelsList);
+      
+      // NOUVEAU : Restaurer les filtres sauvegardés
+      setFilterMode(preservedFilterMode);
+      setSelectedService(preservedSelectedService);
+      setSelectedGroupe(preservedSelectedGroupe);
+      
+      // Filtrer les personnels selon les filtres préservés
+      let filteredPersonnels;
+      if (preservedFilterMode === 'services') {
+        filteredPersonnels = filterPersonnelsByService(preservedSelectedService);
+      } else {
+        filteredPersonnels = filterPersonnelsByGroupe(preservedSelectedGroupe);
+      }
+      setPersonnels(filteredPersonnels);
+      
+      // Charger les types de congés
+      const typesData = await gristAPI.getData('Type_Conges');
+      setTypeConges(typesData);
+      
+      // Charger les congés existants
+      const congesData = await gristAPI.getData('Conges');
+      setConges(congesData);
+      
+      // Initialiser les cases cochées avec les congés existants
+      const newCheckedCells = {};
+      
+      congesData.forEach((conge, index) => {
+        try {
+          const date = parseGristDate(conge.Date);
+          const personnelId = conge.Personnel;
+          const creneau = conge.Creneau;
+          const typeCongeId = conge.Type_Conge;
+          
+          const monthIndex = getSchoolYearMonthIndex(date);
+          const day = date.getDate();
+          
+          if (monthIndex !== -1 && day > 0) {
+            if (!newCheckedCells[personnelId]) {
+              newCheckedCells[personnelId] = {};
+            }
+            if (!newCheckedCells[personnelId][monthIndex]) {
+              newCheckedCells[personnelId][monthIndex] = {};
+            }
+            if (!newCheckedCells[personnelId][monthIndex][day]) {
+              newCheckedCells[personnelId][monthIndex][day] = {
+                morning: { checked: false, typeId: null },
+                afternoon: { checked: false, typeId: null }
+              };
+            }
+            
+            const period = creneau === 'Matinée' ? 'morning' : 'afternoon';
+            newCheckedCells[personnelId][monthIndex][day][period] = {
+              checked: true,
+              typeId: typeCongeId
+            };
+          }
+        } catch (error) {
+          console.error(`Erreur traitement congé ${index + 1}:`, error, conge);
+        }
+      });
+      
+      // Définir l'état initial et actuel
+      const initialState = JSON.parse(JSON.stringify(newCheckedCells));
+      
+      setCheckedCells(newCheckedCells);
+      setInitialCheckedCells(initialState);
+      
+      // Réinitialiser l'état des changements
+      setHasUnsavedChanges(false);
+      
+      // Marquer l'initialisation comme terminée
+      setIsInitialized(true);
+      
+    } catch (error) {
+      console.error('Erreur lors du rechargement des données:', error);
+    }
+  };
+
   // Fonction simplifiée pour sauvegarder les modifications
   const saveConges = async () => {
     try {
@@ -1009,6 +1138,11 @@ const Component = () => {
         }
       }
       
+      // NOUVEAU : Sauvegarder les filtres actuels avant la sauvegarde
+      const currentFilterMode = filterMode;
+      const currentSelectedService = selectedService;
+      const currentSelectedGroupe = selectedGroupe;
+      
       // Supprimer les congés décochés
       for (const congeId of changes.toRemove) {
         await gristAPI.deleteRecord('Conges', congeId);
@@ -1024,8 +1158,8 @@ const Component = () => {
       // Désactiver le bouton
       setHasUnsavedChanges(false);
       
-      // Recharger les données pour synchroniser l'affichage
-      refreshData();
+      // NOUVEAU : Recharger les données en conservant les filtres
+      await reloadDataWithFilters(currentFilterMode, currentSelectedService, currentSelectedGroupe);
       
     } catch (error) {
       console.error('Erreur lors de la sauvegarde:', error);
@@ -1046,7 +1180,7 @@ const Component = () => {
 
   return (
     <div style={styles.container}>
-      {/* MODIFIÉ : En-tête avec structure sur deux lignes */}
+      {/* En-tête avec structure sur deux lignes */}
       <div style={styles.headerContainer}>
         {/* Première ligne : Année, Type de congés, Bouton Sauvegarder */}
         <div style={{...styles.headerRow, ...styles.firstRow}}>
@@ -1074,7 +1208,7 @@ const Component = () => {
                 }
               }}
               style={styles.yearInput}
-              placeholder="2024-2025"
+              placeholder="2025-2026"
             />
             
             <button 
