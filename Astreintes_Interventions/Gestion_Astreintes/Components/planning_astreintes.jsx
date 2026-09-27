@@ -9,19 +9,12 @@ const Component = () => {
   const [loading, setLoading] = useState(true);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState('mois');
-  const [selectedService, setSelectedService] = useState('tous');
   const [selectedServiceClinique, setSelectedServiceClinique] = useState('tous');
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedDate, setSelectedDate] = useState(null);
-  const [formData, setFormData] = useState({ 
-    service: '', 
-    clinicienJour: '', 
-    clinicienNuit: '', 
-    date: '', 
-    jour: false, 
-    nuit: false,
-    jourValidated: false,
-    nuitValidated: false
+  const [formData, setFormData] = useState({
+    service: '', clinicienJour: '', clinicienNuit: '', date: '',
+    jour: false, nuit: false, jourValidated: false, nuitValidated: false
   });
   const [copiedWeek, setCopiedWeek] = useState(null);
 
@@ -30,1490 +23,545 @@ const Component = () => {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [
-        astreintesData, 
-        servicesData, 
-        personnelsData, 
-        utilisateursData,
-        joursSemaineData,
-        joursSeriesData,
-        servicesCliniquesData
-      ] = await Promise.all([
-        gristAPI.getData('Astreintes'), 
-        gristAPI.getData('Services'), 
+      const [astreintesData, servicesData, personnelsData, utilisateursData,
+             joursSemaineData, joursFeriesData, servicesCliniquesData] = await Promise.all([
+        gristAPI.getData('Astreintes'),
+        gristAPI.getData('TypesAstreintes'),
         gristAPI.getData('Personnels'),
         gristAPI.getData('Utilisateurs'),
         gristAPI.getData('JoursSemaine'),
         gristAPI.getData('JoursFeries'),
         gristAPI.getData('ServicesCliniques')
       ]);
-      
-      setAstreintes(Array.isArray(astreintesData) ? astreintesData : []);
-      setServices(Array.isArray(servicesData) ? servicesData : []);
-      setPersonnels(Array.isArray(personnelsData) ? personnelsData : []);
-      setUtilisateurs(Array.isArray(utilisateursData) ? utilisateursData : []);
-      setJoursSemaine(Array.isArray(joursSemaineData) ? joursSemaineData : []);
-      setJoursFeries(Array.isArray(joursSeriesData) ? joursSeriesData : []);
-      setServicesCliniques(Array.isArray(servicesCliniquesData) ? servicesCliniquesData : []);
+      const astr = Array.isArray(astreintesData) ? astreintesData : [];
+      const svcs = Array.isArray(servicesData) ? servicesData : [];
+      const pers = Array.isArray(personnelsData) ? personnelsData : [];
+      const util = Array.isArray(utilisateursData) ? utilisateursData : [];
+      const js   = Array.isArray(joursSemaineData) ? joursSemaineData : [];
+      const jf   = Array.isArray(joursFeriesData) ? joursFeriesData : [];
+      const sc   = Array.isArray(servicesCliniquesData) ? servicesCliniquesData : [];
+      setAstreintes(astr); setServices(svcs); setPersonnels(pers); setUtilisateurs(util);
+      setJoursSemaine(js); setJoursFeries(jf); setServicesCliniques(sc);
 
-      if (Array.isArray(servicesData) && Array.isArray(utilisateursData) && utilisateursData.length > 0) {
-        const premierUtilisateur = utilisateursData[0];
-        let servicesAutorises = servicesData;
-      
-        if (premierUtilisateur.ServiceClinique && premierUtilisateur.ServiceClinique.trim() !== '') {
-          const serviceCliniqueRecherche = premierUtilisateur.ServiceClinique.trim();
-          servicesAutorises = servicesData.filter(service => service.gristHelper_Display2 === serviceCliniqueRecherche);
+      // Auto-sélection service clinique si l'utilisateur n'en a qu'un
+      if (util.length > 0) {
+        const u = util[0];
+        const scVal = u.ServiceClinique;
+        // ServiceClinique peut être une RefList ["L","Anesthésie"] ou une string ou vide
+        let scNoms = [];
+        if (Array.isArray(scVal) && scVal[0] === 'L') {
+          scNoms = scVal.slice(1).filter(Boolean);
+        } else if (typeof scVal === 'string' && scVal.trim() !== '') {
+          scNoms = [scVal.trim()];
         }
-      
-        const servicesCliniques = servicesAutorises
-          .filter(service => service.gristHelper_Display2)
-          .map(service => service.gristHelper_Display2)
-          .filter((value, index, array) => array.indexOf(value) === index);
-      
-        if (servicesCliniques.length === 1) {
-          setSelectedServiceClinique(servicesCliniques[0]);
-        }
+        if (scNoms.length === 1) setSelectedServiceClinique(scNoms[0]);
       }
-
     } catch (error) {
       console.error('Erreur chargement données:', error);
-      setAstreintes([]);
-      setServices([]);
-      setPersonnels([]);
-      setUtilisateurs([]);
-      setJoursSemaine([]);
-      setJoursFeries([]);
-      setServicesCliniques([]);
-    } finally { 
-      setLoading(false); 
-    }
+    } finally { setLoading(false); }
   };
 
-  const isJourFerie = (date) => {
-    if (!date || !joursFeries || joursFeries.length === 0) return false;
-    
-    const targetYear = date.getFullYear();
-    const targetMonth = date.getMonth();
-    const targetDay = date.getDate();
-    
-    return joursFeries.some(jf => {
-      const jfDate = new Date(jf.JourFerie * 1000);
-      return jfDate.getFullYear() === targetYear && 
-             jfDate.getMonth() === targetMonth && 
-             jfDate.getDate() === targetDay;
-    });
+  // ── Utilitaires dates ───────────────────────────────────────────────────────
+  const formatDate = (date) => new Date(date).toLocaleDateString('fr-FR');
+  const dateToTimestamp = (s) => {
+    if (!s) return null;
+    const [y, m, d] = s.split('-').map(Number);
+    return Math.floor(new Date(y, m - 1, d, 12, 0, 0).getTime() / 1000);
+  };
+  const sameDay = (date, timestamp) => {
+    const a = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 12, 0, 0);
+    const b = new Date(timestamp * 1000);
+    const bn = new Date(b.getFullYear(), b.getMonth(), b.getDate(), 12, 0, 0);
+    return Math.abs(a - bn) / 86400000 < 1;
   };
 
-  const getTypeJourSemaine = (date) => {
-    const dayOfWeek = date.getDay();
-    const rang = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-    const jourSemaine = joursSemaine.find(js => js.Rang === rang);
-    return jourSemaine ? jourSemaine.Type : null;
+  const isJourFerie = (date) =>
+    joursFeries.some(jf => sameDay(date, jf.JourFerie));
+
+  const getJourSemaine = (date) => {
+    const rang = date.getDay() === 0 ? 6 : date.getDay() - 1;
+    return joursSemaine.find(js => js.Rang === rang) || null;
   };
 
-  const getNomJourSemaine = (date) => {
-    const dayOfWeek = date.getDay();
-    const rang = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-    const jourSemaine = joursSemaine.find(js => js.Rang === rang);
-    return jourSemaine ? jourSemaine.Jour : null;
+  const isSamediOuvert = (serviceId) => {
+    const svc = services.find(s => s.id === parseInt(serviceId));
+    if (!svc) return false;
+    const sc = servicesCliniques.find(sc => sc.id === svc.ServiceClinique);
+    return sc && sc.Samedi === 'Ouvert';
   };
 
-  const isSamediOuvertPourService = (serviceId) => {
-    if (!serviceId) return false;
-    
-    const service = services.find(s => s.id === parseInt(serviceId));
-    if (!service || !service.gristHelper_Display2) return false;
-    
-    const serviceClinique = servicesCliniques.find(sc => sc.NomService === service.gristHelper_Display2);
-    return serviceClinique && serviceClinique.Samedi === 'Ouvert';
-  };
-
-  const shouldDisableJourAstreinte = (date, serviceId) => {
+  const shouldDisableJour = (date, serviceId) => {
     if (!date) return false;
-    
-    const typeJour = getTypeJourSemaine(date);
-    const nomJour = getNomJourSemaine(date);
-    const estJourFerie = isJourFerie(date);
-    
-    if (typeJour === 'Ouvert' && !estJourFerie) {
-      return true;
-    }
-    
-    if (nomJour === 'Samedi' && !estJourFerie && isSamediOuvertPourService(serviceId)) {
-      return true;
-    }
-    
+    const js = getJourSemaine(date);
+    const ferie = isJourFerie(date);
+    if (js && js.Type === 'Ouvert' && !ferie) return true;
+    if (js && js.Jour === 'Samedi' && !ferie && isSamediOuvert(serviceId)) return true;
     return false;
   };
 
-  const getDisabledJourMessage = (date, serviceId) => {
+  const getDisabledJourMsg = (date, serviceId) => {
     if (!date) return '';
-    
-    const typeJour = getTypeJourSemaine(date);
-    const nomJour = getNomJourSemaine(date);
-    const estJourFerie = isJourFerie(date);
-	
-	if (typeJour === 'Ouvert' && estJourFerie) {
-      return `Astreinte en journée : jour férié`;
-    }
-    
-    if (typeJour === 'Ouvert' && !estJourFerie) {
-      return `Pas d'astreinte en journée : jour ouvert non férié`;
-    }
-
-    if (nomJour === 'Samedi' && estJourFerie && isSamediOuvertPourService(serviceId)) {
-      return `Astreinte en journée : jour férié`;
-    }
-	
-    if (nomJour === 'Samedi' && !estJourFerie && isSamediOuvertPourService(serviceId)) {
-      return `Pas d'astreinte en journée : jour ouvert non férié`;
-    }
-    
+    const js = getJourSemaine(date);
+    const ferie = isJourFerie(date);
+    if (!js) return '';
+    if (js.Type === 'Ouvert' && !ferie) return "Pas d'astreinte en journée : jour ouvert non férié";
+    if (js.Jour === 'Samedi' && !ferie && isSamediOuvert(serviceId)) return "Pas d'astreinte en journée : samedi ouvert non férié";
+    if (ferie) return "Astreinte en journée : jour férié";
     return '';
   };
 
-  const formatDate = (date) => new Date(date).toLocaleDateString('fr-FR');
-  
-  const dateToTimestamp = (dateString) => {
-    if (!dateString) return null;
-    const [year, month, day] = dateString.split('-').map(Number);
-    const date = new Date(year, month - 1, day, 12, 0, 0);
-    return Math.floor(date.getTime() / 1000);
-  };
-
+  // ── Navigation ──────────────────────────────────────────────────────────────
   const navigatePrevious = () => {
-    const newDate = new Date(currentDate);
-    if (viewMode === 'année') newDate.setFullYear(newDate.getFullYear() - 1);
-    else if (viewMode === 'mois') newDate.setMonth(newDate.getMonth() - 1);
-    else if (viewMode === 'semaine') newDate.setDate(newDate.getDate() - 7);
-    setCurrentDate(newDate);
+    const d = new Date(currentDate);
+    if (viewMode === 'année') d.setFullYear(d.getFullYear() - 1);
+    else if (viewMode === 'mois') d.setMonth(d.getMonth() - 1);
+    else d.setDate(d.getDate() - 7);
+    setCurrentDate(d);
   };
-
   const navigateNext = () => {
-    const newDate = new Date(currentDate);
-    if (viewMode === 'année') newDate.setFullYear(newDate.getFullYear() + 1);
-    else if (viewMode === 'mois') newDate.setMonth(newDate.getMonth() + 1);
-    else if (viewMode === 'semaine') newDate.setDate(newDate.getDate() + 7);
-    setCurrentDate(newDate);
+    const d = new Date(currentDate);
+    if (viewMode === 'année') d.setFullYear(d.getFullYear() + 1);
+    else if (viewMode === 'mois') d.setMonth(d.getMonth() + 1);
+    else d.setDate(d.getDate() + 7);
+    setCurrentDate(d);
   };
-
   const goToToday = () => setCurrentDate(new Date());
 
-  const getAstreintesForDate = (date) => {
-    const normalizedDate = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 12, 0, 0);
-    const dateTimestamp = Math.floor(normalizedDate.getTime() / 1000);
-    
-    return astreintes.filter(a => {
-      const astreinteFullDate = new Date(a.Date * 1000);
-      const normalizedAstreinteDate = new Date(astreinteFullDate.getFullYear(), astreinteFullDate.getMonth(), astreinteFullDate.getDate(), 12, 0, 0);
-      const astreinteTimestamp = Math.floor(normalizedAstreinteDate.getTime() / 1000);
-      
-      const diffInDays = Math.abs(dateTimestamp - astreinteTimestamp) / (24 * 60 * 60);
-      return diffInDays < 1;
+  const getStartOfWeek = (date) => {
+    const d = new Date(date);
+    d.setDate(d.getDate() - (d.getDay() === 0 ? 6 : d.getDay() - 1));
+    return d;
+  };
+
+  // ── Filtres ─────────────────────────────────────────────────────────────────
+  const isResponsable = () => utilisateurs.length > 0 && utilisateurs[0].Responsable === true;
+
+  // Services cliniques autorisés pour l'utilisateur courant (textes)
+  // { portee: 'aucun' | 'liste' | 'tous', noms: [...] }
+  // Défaut = 'aucun'. 'tous' n'est accordé qu'à un responsable explicite.
+  const getPerimetreUtilisateur = () => {
+    if (utilisateurs.length === 0) return { portee: 'aucun', noms: [] };
+    const u = utilisateurs[0];
+    const scVal = u.ServiceClinique;
+    let noms = [];
+    if (Array.isArray(scVal) && scVal[0] === 'L') noms = scVal.slice(1).filter(Boolean);
+    else if (typeof scVal === 'string' && scVal.trim() !== '') noms = [scVal.trim()];
+    if (noms.length > 0) return { portee: 'liste', noms };
+    return u.Responsable === true ? { portee: 'tous', noms: [] } : { portee: 'aucun', noms: [] };
+  };
+
+  // Types d'astreinte autorisés pour l'utilisateur courant
+  const getServicesAutorises = () => {
+    const p = getPerimetreUtilisateur();
+    if (p.portee === 'aucun') return [];
+    if (p.portee === 'tous')  return services;
+    return services.filter(s => {
+      const sc = servicesCliniques.find(sc => sc.id === s.ServiceClinique);
+      return sc && p.noms.includes(sc.NomService);
     });
   };
 
-  const getServicesCliniques = () => {
-    if (!services || services.length === 0) return [];
-    
-    const servicesCliniques = services
-      .filter(service => service.gristHelper_Display2)
-      .map(service => service.gristHelper_Display2)
-      .filter((value, index, array) => array.indexOf(value) === index)
-      .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
-    
-    return servicesCliniques;
+  // NomService résolu d'un TypeAstreinte
+  const getServiceCliniqueNom = (svc) => {
+    if (!svc) return '';
+    const sc = servicesCliniques.find(sc => sc.id === svc.ServiceClinique);
+    return sc ? sc.NomService : '';
   };
 
-  const getAstreintesForCurrentView = () => {
-    let filteredAstreintes = astreintes;
-    
-    if (selectedServiceClinique !== 'tous') {
-      filteredAstreintes = filteredAstreintes.filter(astreinte => {
-        const service = services.find(s => s.id === astreinte.Service);
-        return service && service.gristHelper_Display2 === selectedServiceClinique;
-      });
-    }
-    
-    const year = currentDate.getFullYear();
-    const month = currentDate.getMonth();
-    
-    if (viewMode === 'année') {
-      filteredAstreintes = filteredAstreintes.filter(a => {
-        const aDate = new Date(a.Date * 1000);
-        return aDate.getFullYear() === year;
-      });
-    } else if (viewMode === 'mois') {
-      filteredAstreintes = filteredAstreintes.filter(a => {
-        const aDate = new Date(a.Date * 1000);
-        return aDate.getFullYear() === year && aDate.getMonth() === month;
-      });
-    } else if (viewMode === 'semaine') {
-      const startOfWeek = new Date(currentDate);
-      const dayOfWeek = startOfWeek.getDay();
-      const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-      startOfWeek.setDate(startOfWeek.getDate() - daysToSubtract);
-    
-      const endOfWeek = new Date(startOfWeek);
-      endOfWeek.setDate(endOfWeek.getDate() + 7);
-    
-      filteredAstreintes = filteredAstreintes.filter(a => {
-        const aDate = new Date(a.Date * 1000);
-        return aDate >= startOfWeek && aDate <= endOfWeek;
-      });
-    }
-  
-    return filteredAstreintes;
+  // Liste des NomService distincts (pour le filtre dropdown)
+  const getServicesCliniquesNoms = () => {
+    const svcsAuto = getServicesAutorises();
+    return [...new Set(svcsAuto.map(s => getServiceCliniqueNom(s)).filter(Boolean))].sort();
   };
 
-  const getFilteredAstreintes = (dateAstreintes) => {
-    if (selectedServiceClinique === 'tous') return dateAstreintes;
-    
-    return dateAstreintes.filter(astreinte => {
-      const service = services.find(s => s.id === astreinte.Service);
-      return service && service.gristHelper_Display2 === selectedServiceClinique;
-    });
-  };
-  
-  const getPeriodTitle = () => {
-    switch (viewMode) {
-      case 'année':
-        return `de l'année ${currentDate.getFullYear()}`;
-      case 'mois':
-        return `du mois de ${currentDate.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}`;
-      case 'semaine':
-        const startOfWeek = new Date(currentDate);
-        const dayOfWeek = startOfWeek.getDay();
-        const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-        startOfWeek.setDate(startOfWeek.getDate() - daysToSubtract);
-      
-        const endOfWeek = new Date(startOfWeek);
-        endOfWeek.setDate(endOfWeek.getDate() + 6);
-        return `de la semaine du ${startOfWeek.getDate()} au ${endOfWeek.getDate()} ${endOfWeek.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}`;
-      default:
-        return '';
-    }
+  const getAstreintesForDate = (date) =>
+    astreintes.filter(a => sameDay(date, a.Date));
+
+  const filterBySC = (list) => {
+    if (selectedServiceClinique === 'tous') return list;
+    // astreinte.ServiceClinique est un texte calculé = NomService du TypeAstreinte
+    return list.filter(a => a.ServiceClinique === selectedServiceClinique);
   };
 
-  const getServiceName = (serviceId) => {
-    const service = services.find(s => s.id === serviceId);
-    return service ? service.Denomination : 'Service inconnu';
+  const filterByPeriod = (list) => {
+    const y = currentDate.getFullYear(), m = currentDate.getMonth();
+    if (viewMode === 'année') return list.filter(a => new Date(a.Date * 1000).getFullYear() === y);
+    if (viewMode === 'mois')  return list.filter(a => { const d = new Date(a.Date * 1000); return d.getFullYear() === y && d.getMonth() === m; });
+    const sw = getStartOfWeek(currentDate), ew = new Date(sw); ew.setDate(ew.getDate() + 7);
+    return list.filter(a => { const d = new Date(a.Date * 1000); return d >= sw && d <= ew; });
   };
 
-  const getClinicienName = (clinicienId) => {
-    const clinicien = personnels.find(p => p.id === clinicienId);
-    return clinicien ? clinicien.Clinicien : 'Clinicien inconnu';
+  // Filtre astreintes selon services autorisés de l'utilisateur
+  const filterByUser = (list) => {
+    const p = getPerimetreUtilisateur();
+    if (p.portee === 'aucun') return [];
+    if (p.portee === 'tous')  return list;
+    return list.filter(a => p.noms.includes(a.ServiceClinique));
   };
 
+  const getAstreintesView = () => filterBySC(filterByPeriod(filterByUser(astreintes)));
+
+  // ── Noms ────────────────────────────────────────────────────────────────────
+  const getServiceName = (typeAstreinteId) => {
+    const s = services.find(s => s.id === typeAstreinteId);
+    return s ? s.TypeAstreinte : 'Service inconnu';
+  };
+  const getClinicienName = (id) => {
+    if (!id || id === 0) return '';
+    const p = personnels.find(p => p.id === id);
+    return p ? p.Clinicien : 'Inconnu';
+  };
+
+  // Cliniciens éligibles pour un TypeAstreinte (via la RefList Cliniciens du TypeAstreinte)
   const getCliniciensByService = (serviceId) => {
     if (!serviceId) return [];
-    
-    const selectedService = services.find(s => s.id === parseInt(serviceId));
-    if (!selectedService || !selectedService.ServiceClinique) return [];
-    
-    return personnels.filter(p => p.ServiceClinique === selectedService.ServiceClinique);
+    const svc = services.find(s => s.id === parseInt(serviceId));
+    if (!svc || !svc.Cliniciens) return personnels.filter(p => p.ServiceClinique === svc.ServiceClinique);
+    // svc.Cliniciens est une RefList ["L", id1, id2, ...]
+    const ids = Array.isArray(svc.Cliniciens) && svc.Cliniciens[0] === 'L'
+      ? svc.Cliniciens.slice(1) : [];
+    return personnels.filter(p => ids.includes(p.id));
   };
 
-  const isJourAstreinte = (astreinte) => astreinte.Type === '☀️ Jour';
-  const isNuitAstreinte = (astreinte) => astreinte.Type === '🌙 Nuit';
+  const isJour = (a) => a.Type === '☀️ Jour';
+  const isNuit = (a) => a.Type === '🌙 Nuit';
 
-  const isResponsable = () => {
-    if (!utilisateurs || utilisateurs.length === 0) return false;
-    const premierUtilisateur = utilisateurs[0];
-    return premierUtilisateur.Responsable === true;
-  };
-
-  const getServicesAutorises = () => {
-    if (!services || services.length === 0) {
-      return [];
-    }
-    
-    if (!utilisateurs || utilisateurs.length === 0) {
-      return services;
-    }
-    
-    const premierUtilisateur = utilisateurs[0];
-    
-    if (!premierUtilisateur.ServiceClinique || premierUtilisateur.ServiceClinique.trim() === '') {
-      return services;
-    }
-    
-    const serviceCliniqueRecherche = premierUtilisateur.ServiceClinique.trim();
-    
-    const servicesFilters = services.filter(service => {
-      return service.gristHelper_Display2 === serviceCliniqueRecherche;
-    });
-    
-    return servicesFilters;
-  };
-
+  // ── Modal ───────────────────────────────────────────────────────────────────
   const loadExistingAstreintes = (date, serviceId) => {
-    if (!serviceId || serviceId === 'tous') {
-      return { 
-        clinicienJour: '', 
-        clinicienNuit: '', 
-        jour: false, 
-        nuit: false,
-        jourValidated: false,
-        nuitValidated: false
-      };
-    }
-    
-    const servicesAutorises = getServicesAutorises();
-    const serviceAutorise = servicesAutorises.find(s => s.id === parseInt(serviceId));
-    
-    if (!serviceAutorise) {
-      return { 
-        clinicienJour: '', 
-        clinicienNuit: '', 
-        jour: false, 
-        nuit: false,
-        jourValidated: false,
-        nuitValidated: false
-      };
-    }
-    
-    const dayAstreintes = getAstreintesForDate(date);
-    const serviceAstreintes = dayAstreintes.filter(a => a.Service === parseInt(serviceId));
-    
-    const jourAstreinte = serviceAstreintes.find(a => isJourAstreinte(a));
-    const nuitAstreinte = serviceAstreintes.find(a => isNuitAstreinte(a));
-    
+    const empty = { clinicienJour: '', clinicienNuit: '', jour: false, nuit: false, jourValidated: false, nuitValidated: false };
+    if (!serviceId) return empty;
+    const dayA = getAstreintesForDate(date).filter(a => a.TypeAstreinte === parseInt(serviceId));
+    const j = dayA.find(a => isJour(a));
+    const n = dayA.find(a => isNuit(a));
     return {
-      clinicienJour: jourAstreinte ? jourAstreinte.Clinicien.toString() : '',
-      clinicienNuit: nuitAstreinte ? nuitAstreinte.Clinicien.toString() : '',
-      jour: !!jourAstreinte,
-      nuit: !!nuitAstreinte,
-      jourValidated: jourAstreinte ? jourAstreinte.ValidationService === true : false,
-      nuitValidated: nuitAstreinte ? nuitAstreinte.ValidationService === true : false
+      clinicienJour: j ? j.Clinicien.toString() : '',
+      clinicienNuit: n ? n.Clinicien.toString() : '',
+      jour: !!j, nuit: !!n,
+      jourValidated: j ? j.En_Suivi === true : false,
+      nuitValidated: n ? n.En_Suivi === true : false
     };
   };
 
   const handleDateClick = (date) => {
     setSelectedDate(date);
-	
-	const servicesAutorises = getServicesAutorises();
-	
-    const initialService = servicesAutorises.length === 1 ? servicesAutorises[0].id : '';
-    const existingData = loadExistingAstreintes(date, initialService);
-    
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const dateString = `${year}-${month}-${day}`;
-    
-    setFormData({ 
-      service: initialService, 
-      date: dateString, 
-      ...existingData 
-    });
+    const svcsAuto = getServicesAutorises();
+    const initSvc = svcsAuto.length === 1 ? svcsAuto[0].id : '';
+    const existing = loadExistingAstreintes(date, initSvc);
+    const y = date.getFullYear(), mo = String(date.getMonth() + 1).padStart(2, '0'), d = String(date.getDate()).padStart(2, '0');
+    setFormData({ service: initSvc, date: `${y}-${mo}-${d}`, ...existing });
     setShowAddModal(true);
   };
 
-  const handleServiceChange = (newServiceId) => {
-    const existingData = loadExistingAstreintes(selectedDate, newServiceId);
-    setFormData(prev => ({ 
-      ...prev, 
-      service: newServiceId, 
-      ...existingData 
-    }));
+  const handleServiceChange = (newId) => {
+    setFormData(prev => ({ ...prev, service: newId, ...loadExistingAstreintes(selectedDate, newId) }));
   };
 
   const handleSaveAstreinte = async () => {
     if (!formData.service || (!formData.clinicienJour && !formData.clinicienNuit)) {
-      alert('Veuillez sélectionner au moins un service et un clinicien');
-      return;
+      alert('Veuillez sélectionner au moins un service et un clinicien'); return;
     }
-
     try {
-      const dateTimestamp = dateToTimestamp(formData.date);
-      const dayAstreintes = getAstreintesForDate(selectedDate);
-      const serviceAstreintes = dayAstreintes.filter(a => a.Service === parseInt(formData.service));
-      
-      const existingJour = serviceAstreintes.find(a => isJourAstreinte(a));
-      if (formData.jour && formData.clinicienJour) {
-        if (existingJour) {
-          await gristAPI.updateRecord('Astreintes', existingJour.id, {
-            Clinicien: parseInt(formData.clinicienJour)
-          });
-        } else {
-          await gristAPI.addRecord('Astreintes', {
-            Service: parseInt(formData.service),
-            Clinicien: parseInt(formData.clinicienJour),
-            Date: dateTimestamp,
-            Type: '☀️ Jour'
-          });
-        }
-      } else if (existingJour) {
-        await gristAPI.deleteRecord('Astreintes', existingJour.id);
-      }
+      const ts = dateToTimestamp(formData.date);
+      const dayA = getAstreintesForDate(selectedDate).filter(a => a.TypeAstreinte === parseInt(formData.service));
+      const existJ = dayA.find(a => isJour(a));
+      const existN = dayA.find(a => isNuit(a));
 
-      const existingNuit = serviceAstreintes.find(a => isNuitAstreinte(a));
+      if (formData.jour && formData.clinicienJour) {
+        if (existJ) await gristAPI.updateRecord('Astreintes', existJ.id, { Clinicien: parseInt(formData.clinicienJour) });
+        else await gristAPI.addRecord('Astreintes', { TypeAstreinte: parseInt(formData.service), Clinicien: parseInt(formData.clinicienJour), Date: ts, Type: '☀️ Jour' });
+      } else if (existJ) await gristAPI.deleteRecord('Astreintes', existJ.id);
+
       if (formData.nuit && formData.clinicienNuit) {
-        if (existingNuit) {
-          await gristAPI.updateRecord('Astreintes', existingNuit.id, {
-            Clinicien: parseInt(formData.clinicienNuit)
-          });
-        } else {
-          await gristAPI.addRecord('Astreintes', {
-            Service: parseInt(formData.service),
-            Clinicien: parseInt(formData.clinicienNuit),
-            Date: dateTimestamp,
-            Type: '🌙 Nuit'
-          });
-        }
-      } else if (existingNuit) {
-        await gristAPI.deleteRecord('Astreintes', existingNuit.id);
-      }
+        if (existN) await gristAPI.updateRecord('Astreintes', existN.id, { Clinicien: parseInt(formData.clinicienNuit) });
+        else await gristAPI.addRecord('Astreintes', { TypeAstreinte: parseInt(formData.service), Clinicien: parseInt(formData.clinicienNuit), Date: ts, Type: '🌙 Nuit' });
+      } else if (existN) await gristAPI.deleteRecord('Astreintes', existN.id);
 
       setShowAddModal(false);
       setFormData({ service: '', clinicienJour: '', clinicienNuit: '', date: '', jour: false, nuit: false, jourValidated: false, nuitValidated: false });
       await loadData();
-    } catch (error) {
-      alert('Erreur lors de la sauvegarde: ' + error.message);
-    }
+    } catch (e) { alert('Erreur sauvegarde: ' + e.message); }
   };
 
-  const handleDeleteAstreinte = async (astreinte) => {
+  const handleDeleteAstreinte = async (a) => {
     if (confirm('Supprimer cette astreinte ?')) {
-      try { 
-        await gristAPI.deleteRecord('Astreintes', astreinte.id); 
-        await loadData(); 
-      } catch (error) { 
-        alert('Erreur lors de la suppression: ' + error.message); 
-      }
+      try { await gristAPI.deleteRecord('Astreintes', a.id); await loadData(); }
+      catch (e) { alert('Erreur suppression: ' + e.message); }
     }
   };
 
+  // ── Copier/coller semaine ───────────────────────────────────────────────────
   const handleCopyWeek = () => {
-    const startOfWeek = new Date(currentDate);
-    const dayOfWeek = startOfWeek.getDay();
-    const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-    startOfWeek.setDate(startOfWeek.getDate() - daysToSubtract);
-
+    const sw = getStartOfWeek(currentDate);
+    const svcsAutoIds = getServicesAutorises().map(s => s.id);
     const weekData = [];
-  
-    const servicesAutorises = getServicesAutorises();
-    const servicesAutoriseIds = servicesAutorises.map(s => s.id);
-  
     for (let i = 0; i < 7; i++) {
-      const dayDate = new Date(startOfWeek);
-      dayDate.setDate(dayDate.getDate() + i);
-      const dayAstreintes = getFilteredAstreintes(getAstreintesForDate(dayDate));
-    
-      dayAstreintes.forEach(astreinte => {
-        if (servicesAutoriseIds.includes(astreinte.Service)) {
-          weekData.push({
-            dayOffset: i,
-            service: astreinte.Service,
-            clinicien: astreinte.Clinicien,
-            type: astreinte.Type
-          });
-        }
-      });
+      const day = new Date(sw); day.setDate(day.getDate() + i);
+      filterBySC(getAstreintesForDate(day))
+        .filter(a => svcsAutoIds.includes(a.TypeAstreinte))
+        .forEach(a => weekData.push({ dayOffset: i, service: a.TypeAstreinte, clinicien: a.Clinicien, type: a.Type }));
     }
-
-    const endOfWeek = new Date(startOfWeek);
-    endOfWeek.setDate(endOfWeek.getDate() + 6);
-  
-    setCopiedWeek({
-      data: weekData,
-      startDate: startOfWeek,
-      endDate: endOfWeek
-    });
-  
-    // alert(`Semaine copiée ! ${weekData.length} astreinte(s) copiée(s).`);
+    const ew = new Date(sw); ew.setDate(ew.getDate() + 6);
+    setCopiedWeek({ data: weekData, startDate: new Date(sw), endDate: ew });
   };
 
   const handlePasteWeek = async () => {
-    if (!copiedWeek || !copiedWeek.data || copiedWeek.data.length === 0) {
-      alert('Aucune semaine copiée. Veuillez d\'abord copier une semaine.');
-      return;
-    }
-
-    /*
-	if (!confirm(`Coller ${copiedWeek.data.length} astreinte(s) dans la semaine actuelle ?\n\nAttention : Les astreintes existantes non validées seront remplacées.`)) {
-      return;
-    }
-	*/
-
-    try {
-      const startOfWeek = new Date(currentDate);
-      const dayOfWeek = startOfWeek.getDay();
-      const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-      startOfWeek.setDate(startOfWeek.getDate() - daysToSubtract);
-
-      let successCount = 0;
-      let errorCount = 0;
-
-      for (const copiedAstreinte of copiedWeek.data) {
-        try {
-          const targetDate = new Date(startOfWeek);
-          targetDate.setDate(targetDate.getDate() + copiedAstreinte.dayOffset);
-          const dateTimestamp = Math.floor(targetDate.getTime() / 1000);
-
-          const existingAstreintes = getAstreintesForDate(targetDate);
-          const existingForService = existingAstreintes.filter(a => 
-            a.Service === copiedAstreinte.service && 
-            a.Type === copiedAstreinte.type
-          );
-
-          if (existingForService.length > 0) {
-            const existing = existingForService[0];
-            if (existing.ValidationService === true) {
-              console.log(`Astreinte validée ignorée pour ${formatDate(targetDate)}`);
-              continue;
-            }
-            
-            await gristAPI.updateRecord('Astreintes', existing.id, {
-              Clinicien: copiedAstreinte.clinicien
-            });
-          } else {
-            await gristAPI.addRecord('Astreintes', {
-              Service: copiedAstreinte.service,
-              Clinicien: copiedAstreinte.clinicien,
-              Date: dateTimestamp,
-              Type: copiedAstreinte.type
-            });
-          }
-          successCount++;
-        } catch (error) {
-          console.error('Erreur lors du collage d\'une astreinte:', error);
-          errorCount++;
+    if (!copiedWeek?.data?.length) { alert("Aucune semaine copiée."); return; }
+    const sw = getStartOfWeek(currentDate);
+    let ok = 0, ko = 0;
+    for (const ca of copiedWeek.data) {
+      try {
+        const day = new Date(sw); day.setDate(day.getDate() + ca.dayOffset);
+        const ts = Math.floor(day.getTime() / 1000);
+        const existing = getAstreintesForDate(day).find(a => a.TypeAstreinte === ca.service && a.Type === ca.type);
+        if (existing) {
+          if (existing.En_Suivi) continue;
+          await gristAPI.updateRecord('Astreintes', existing.id, { Clinicien: ca.clinicien });
+        } else {
+          await gristAPI.addRecord('Astreintes', { TypeAstreinte: ca.service, Clinicien: ca.clinicien, Date: ts, Type: ca.type });
         }
-      }
-
-      await loadData();
-    
-      if (errorCount > 0) {
-        alert(`Collage terminé avec des erreurs.\n${successCount} astreinte(s) collée(s) avec succès.\n${errorCount} erreur(s).`);
-      } else {
-        // alert(`Semaine collée avec succès ! ${successCount} astreinte(s) créée(s) ou mise(s) à jour.`);
-      }
-    
-    } catch (error) {
-      alert('Erreur lors du collage de la semaine: ' + error.message);
+        ok++;
+      } catch (e) { ko++; }
     }
+    await loadData();
+    if (ko > 0) alert(`${ok} astreinte(s) collée(s), ${ko} erreur(s).`);
   };
 
+  // ── Titre période ───────────────────────────────────────────────────────────
+  const getCurrentViewTitle = () => {
+    if (viewMode === 'année') return currentDate.getFullYear();
+    if (viewMode === 'mois') return currentDate.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+    const sw = getStartOfWeek(currentDate), ew = new Date(sw); ew.setDate(ew.getDate() + 6);
+    return `${sw.getDate()} - ${ew.getDate()} ${ew.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}`;
+  };
+  const getPeriodTitle = () => {
+    if (viewMode === 'année') return `de l'année ${currentDate.getFullYear()}`;
+    if (viewMode === 'mois') return `du mois de ${currentDate.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}`;
+    const sw = getStartOfWeek(currentDate), ew = new Date(sw); ew.setDate(ew.getDate() + 6);
+    return `de la semaine du ${sw.getDate()} au ${ew.getDate()} ${ew.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}`;
+  };
+
+  // ── Rendu vues ──────────────────────────────────────────────────────────────
   const renderYearView = () => {
-    const year = currentDate.getFullYear(); 
-    const months = [];
-    
-    for (let month = 0; month < 12; month++) {
-      const monthDate = new Date(year, month, 1);
-      const monthName = monthDate.toLocaleDateString('fr-FR', { month: 'long' });
-      const monthAstreintes = astreintes.filter(a => {
-        const aDate = new Date(a.Date * 1000);
-        const matchesDate = aDate.getFullYear() === year && aDate.getMonth() === month;
-        
-        if (!matchesDate) return false;
-        
-        if (selectedServiceClinique === 'tous') return true;
-        
-        const service = services.find(s => s.id === a.Service);
-        return service && service.gristHelper_Display2 === selectedServiceClinique;
-      });
-      
-      months.push(
-        <div 
-          key={month} 
-          onClick={() => { setCurrentDate(monthDate); setViewMode('mois'); }} 
-          style={{ 
-            background: 'white', 
-            padding: '20px', 
-            borderRadius: '8px', 
-            boxShadow: '0 2px 10px rgba(0,0,0,0.1)', 
-            cursor: 'pointer', 
-            transition: 'transform 0.2s, box-shadow 0.2s', 
-            textAlign: 'center' 
-          }} 
-          onMouseEnter={(e) => { 
-            e.currentTarget.style.transform = 'translateY(-2px)'; 
-            e.currentTarget.style.boxShadow = '0 4px 20px rgba(0,0,0,0.15)'; 
-          }} 
-          onMouseLeave={(e) => { 
-            e.currentTarget.style.transform = 'translateY(0)'; 
-            e.currentTarget.style.boxShadow = '0 2px 10px rgba(0,0,0,0.1)'; 
-          }}
-        >
-          <h3 style={{ margin: '0 0 10px 0', color: '#1f2937', textTransform: 'capitalize' }}>
-            {monthName}
-          </h3>
-          <div style={{ fontSize: '24px', color: '#3b82f6', fontWeight: 'bold', marginBottom: '5px' }}>
-            {monthAstreintes.length}
-          </div>
-          <div style={{ fontSize: '12px', color: '#6b7280' }}>
-            astreinte{monthAstreintes.length > 1 ? 's' : ''}
-          </div>
-        </div>
-      );
-    }
-    
+    const y = currentDate.getFullYear();
     return (
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px' }}>
-        {months}
+        {Array.from({ length: 12 }, (_, month) => {
+          const md = new Date(y, month, 1);
+          const count = filterBySC(filterByUser(astreintes)).filter(a => { const d = new Date(a.Date * 1000); return d.getFullYear() === y && d.getMonth() === month; }).length;
+          return (
+            <div key={month} onClick={() => { setCurrentDate(md); setViewMode('mois'); }} style={{ background: 'white', padding: '20px', borderRadius: '8px', boxShadow: '0 2px 10px rgba(0,0,0,0.1)', cursor: 'pointer', textAlign: 'center', transition: 'transform 0.2s' }} onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-2px)'} onMouseLeave={e => e.currentTarget.style.transform = 'none'}>
+              <h3 style={{ margin: '0 0 10px 0', color: '#1f2937', textTransform: 'capitalize' }}>{md.toLocaleDateString('fr-FR', { month: 'long' })}</h3>
+              <div style={{ fontSize: '24px', color: '#3b82f6', fontWeight: 'bold' }}>{count}</div>
+              <div style={{ fontSize: '12px', color: '#6b7280' }}>astreinte{count > 1 ? 's' : ''}</div>
+            </div>
+          );
+        })}
       </div>
     );
   };
 
   const renderMonthView = () => {
-    const year = currentDate.getFullYear(); 
-    const month = currentDate.getMonth(); 
-    const firstDay = new Date(year, month, 1); 
-    const startDate = new Date(firstDay);
-	
-	const dayOfWeek = firstDay.getDay();
-	const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-	startDate.setDate(startDate.getDate() - daysToSubtract);
-	
-    const days = []; 
-    const currentDay = new Date(startDate); 
+    const y = currentDate.getFullYear(), mo = currentDate.getMonth();
+    const firstDay = new Date(y, mo, 1);
+    const start = new Date(firstDay);
+    start.setDate(start.getDate() - (firstDay.getDay() === 0 ? 6 : firstDay.getDay() - 1));
+    const cur = new Date(start);
     const dayHeaders = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
-    
-    for (let week = 0; week < 6; week++) {
-      for (let day = 0; day < 7; day++) {
-        const dayDate = new Date(currentDay); 
-        const isCurrentMonth = dayDate.getMonth() === month; 
-        const isToday = dayDate.toDateString() === new Date().toDateString(); 
-        const dayAstreintes = getFilteredAstreintes(getAstreintesForDate(dayDate));
-        
-        days.push(
-          <div 
-            key={`${week}-${day}`} 
-            onClick={() => {
-              if (isCurrentMonth) {
-                setCurrentDate(dayDate);
-                setViewMode('semaine');
-              }
-            }}
-            style={{ 
-              minHeight: '100px', 
-              padding: '8px', 
-              border: '1px solid #e5e7eb', 
-              background: isCurrentMonth ? 'white' : '#f9fafb', 
-              cursor: isCurrentMonth ? 'pointer' : 'default', 
-              position: 'relative', 
-              opacity: isCurrentMonth ? 1 : 0.5 
-            }}
-          >
-            <div style={{ 
-              fontWeight: isToday ? 'bold' : 'normal', 
-              color: isToday ? '#3b82f6' : isCurrentMonth ? '#1f2937' : '#9ca3af', 
-              marginBottom: '4px', 
-              fontSize: '14px' 
-            }}>
-              {dayDate.getDate()}
-            </div>
-            {dayAstreintes.length > 0 && (
-              <div style={{ fontSize: '10px' }}>
-                {dayAstreintes.slice(0, 3).map((astreinte, index) => (
-                  <div 
-                    key={index} 
-                    style={{ 
-                      background: isJourAstreinte(astreinte) ? '#dbeafe' : '#e0f2fe',
-                      border: astreinte.ValidationService === true ? '1px solid #10b981' : '1px solid #3b82f6',
-                      color: isJourAstreinte(astreinte) ? '#1e40af' : '#0c4a6e', 
-                      padding: '2px 4px', 
-                      borderRadius: '3px', 
-                      marginBottom: '2px', 
-                      overflow: 'hidden', 
-                      textOverflow: 'ellipsis', 
-                      whiteSpace: 'nowrap' 
-                    }} 
-                    title={`${getServiceName(astreinte.Service)} - ${getClinicienName(astreinte.Clinicien)}`}
-                  >
-                    {isJourAstreinte(astreinte) ? '☀️' : '🌙'} {getServiceName(astreinte.Service).substring(0, 8)}...
-                  </div>
-                ))}
-                {dayAstreintes.length > 3 && (
-                  <div style={{ color: '#6b7280', fontSize: '9px' }}>
-                    +{dayAstreintes.length - 3} autre{dayAstreintes.length - 3 > 1 ? 's' : ''}
-                  </div>
-                )}
+    const cells = [];
+    for (let w = 0; w < 6; w++) for (let d = 0; d < 7; d++) {
+      const day = new Date(cur);
+      const inMonth = day.getMonth() === mo;
+      const isToday = day.toDateString() === new Date().toDateString();
+      const dayA = filterBySC(getAstreintesForDate(day));
+      cells.push(
+        <div key={`${w}-${d}`} onClick={() => inMonth && (setCurrentDate(day), setViewMode('semaine'))} style={{ minHeight: '100px', padding: '8px', border: '1px solid #e5e7eb', background: inMonth ? 'white' : '#f9fafb', cursor: inMonth ? 'pointer' : 'default', opacity: inMonth ? 1 : 0.5 }}>
+          <div style={{ fontWeight: isToday ? 'bold' : 'normal', color: isToday ? '#3b82f6' : inMonth ? '#1f2937' : '#9ca3af', marginBottom: '4px', fontSize: '14px' }}>{day.getDate()}</div>
+          <div style={{ fontSize: '10px' }}>
+            {dayA.slice(0, 3).map((a, i) => (
+              <div key={i} style={{ background: isJour(a) ? '#dbeafe' : '#e0f2fe', border: `1px solid ${a.En_Suivi ? '#10b981' : '#3b82f6'}`, color: isJour(a) ? '#1e40af' : '#0c4a6e', padding: '2px 4px', borderRadius: '3px', marginBottom: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {isJour(a) ? '☀️' : '🌙'} {getServiceName(a.TypeAstreinte).substring(0, 20)}
               </div>
-            )}
+            ))}
+            {dayA.length > 3 && <div style={{ color: '#6b7280', fontSize: '9px' }}>+{dayA.length - 3} autre{dayA.length > 4 ? 's' : ''}</div>}
           </div>
-        );
-        
-        currentDay.setDate(currentDay.getDate() + 1);
-      }
+        </div>
+      );
+      cur.setDate(cur.getDate() + 1);
     }
-    
     return (
-      <div>
-        <div style={{ 
-          display: 'grid', 
-          gridTemplateColumns: 'repeat(7, 1fr)', 
-          background: '#f3f4f6', 
-          border: '1px solid #e5e7eb' 
-        }}>
-          {dayHeaders.map(day => (
-            <div 
-              key={day} 
-              style={{ 
-                padding: '12px 8px', 
-                textAlign: 'center', 
-                fontWeight: '600', 
-                fontSize: '14px', 
-                color: '#374151' 
-              }}
-            >
-              {day}
-            </div>
-          ))}
-        </div>
-        <div style={{ 
-          display: 'grid', 
-          gridTemplateColumns: 'repeat(7, 1fr)', 
-          background: 'white', 
-          border: '1px solid #e5e7eb', 
-          borderTop: 'none' 
-        }}>
-          {days}
-        </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
+        {dayHeaders.map(h => <div key={h} style={{ padding: '12px 8px', textAlign: 'center', fontWeight: '600', fontSize: '14px', color: '#374151', background: '#f3f4f6', border: '1px solid #e5e7eb' }}>{h}</div>)}
+        {cells}
       </div>
     );
   };
 
   const renderWeekView = () => {
-    const startOfWeek = new Date(currentDate);
-    const dayOfWeek = startOfWeek.getDay();
-    const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-    startOfWeek.setDate(startOfWeek.getDate() - daysToSubtract);
-  
-    const days = [];
-  
-    for (let i = 0; i < 7; i++) {
-      const dayDate = new Date(startOfWeek); 
-      dayDate.setDate(dayDate.getDate() + i); 
-      const isToday = dayDate.toDateString() === new Date().toDateString(); 
-	  const dayAstreintes = getFilteredAstreintes(getAstreintesForDate(dayDate));
-      
-      const sortedAstreintes = dayAstreintes.sort((a, b) => {
-        const serviceA = getServiceName(a.Service);
-        const serviceB = getServiceName(b.Service);
-        
-        const serviceCompare = serviceA.localeCompare(serviceB, 'fr', { sensitivity: 'base' });
-        if (serviceCompare !== 0) return serviceCompare;
-        
-        const typeA = isJourAstreinte(a) ? 0 : 1;
-        const typeB = isJourAstreinte(b) ? 0 : 1;
-        return typeA - typeB;
-      });
-      
-      days.push(
-        <div key={i} style={{ flex: 1 }}>
-          <div style={{ 
-            padding: '15px', 
-            background: '#f3f4f6', 
-            textAlign: 'center', 
-            borderBottom: '1px solid #e5e7eb', 
-            fontWeight: isToday ? 'bold' : '500', 
-            color: isToday ? '#3b82f6' : '#1f2937' 
-          }}>
-            <div style={{ fontSize: '12px', marginBottom: '2px' }}>
-              {dayDate.toLocaleDateString('fr-FR', { weekday: 'short' })}
+    const sw = getStartOfWeek(currentDate);
+    return (
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
+        {Array.from({ length: 7 }, (_, i) => {
+          const day = new Date(sw); day.setDate(day.getDate() + i);
+          const isToday = day.toDateString() === new Date().toDateString();
+          const dayA = filterBySC(getAstreintesForDate(day))
+            .sort((a, b) => getServiceName(a.TypeAstreinte).localeCompare(getServiceName(b.TypeAstreinte), 'fr') || (isJour(a) ? -1 : 1));
+          return (
+            <div key={i}>
+              <div style={{ padding: '15px', background: '#f3f4f6', textAlign: 'center', borderBottom: '1px solid #e5e7eb', fontWeight: isToday ? 'bold' : '500', color: isToday ? '#3b82f6' : '#1f2937' }}>
+                <div style={{ fontSize: '12px', marginBottom: '2px' }}>{day.toLocaleDateString('fr-FR', { weekday: 'short' })}</div>
+                <div style={{ fontSize: '16px' }}>{day.getDate()}</div>
+              </div>
+              <div style={{ padding: '10px', minHeight: '300px', background: 'white' }}>
+                <button onClick={() => handleDateClick(day)} disabled={!isResponsable()} style={{ width: '100%', padding: '6px', background: '#f3f4f6', border: '1px dashed #d1d5db', borderRadius: '4px', fontSize: '11px', color: '#6b7280', cursor: isResponsable() ? 'pointer' : 'default', marginBottom: '8px', opacity: isResponsable() ? 1 : 0.5 }}>
+                  {isResponsable() ? '✏️ Gérer' : '👁️ Consulter'}
+                </button>
+                {dayA.map((a, idx) => (
+                  <div key={idx} style={{ background: isJour(a) ? '#dbeafe' : '#e0f2fe', padding: '6px 8px', borderRadius: '6px', marginBottom: '6px', fontSize: '11px', position: 'relative', border: `2px solid ${a.En_Suivi ? '#10b981' : '#3b82f6'}`, opacity: a.En_Suivi ? 0.8 : 1 }}>
+                    <div style={{ fontWeight: '500', marginBottom: '2px' }}>{isJour(a) ? '☀️' : '🌙'} {getServiceName(a.TypeAstreinte)}</div>
+                    <div style={{ color: '#6b7280' }}>{getClinicienName(a.Clinicien)}</div>
+                    {isResponsable() && (
+                      <button onClick={() => { if (a.En_Suivi) { alert('Astreinte validée, suppression impossible'); return; } handleDeleteAstreinte(a); }} style={{ position: 'absolute', top: '4px', right: '4px', background: a.En_Suivi ? '#d1d5db' : '#fecaca', color: a.En_Suivi ? '#9ca3af' : '#ef4444', border: 'none', borderRadius: '3px', padding: '1px 4px', fontSize: '10px', cursor: a.En_Suivi ? 'not-allowed' : 'pointer' }}>
+                        {a.En_Suivi ? '🔒' : '❌'}
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
-            <div style={{ fontSize: '16px' }}>{dayDate.getDate()}</div>
-          </div>
-          <div style={{ padding: '15px', minHeight: '300px', background: 'white' }}>
-            <button 
-              onClick={() => handleDateClick(dayDate)} 
-              style={{ 
-                width: '100%', 
-                padding: '8px', 
-                background: '#f3f4f6', 
-                border: '1px dashed #d1d5db', 
-                borderRadius: '4px', 
-                fontSize: '12px', 
-                color: '#6b7280', 
-                cursor: isResponsable() ? 'pointer' : 'default', 
-                marginBottom: '10px',
-                opacity: isResponsable() ? 1 : 0.6
-              }}
-              disabled={!isResponsable()}
-            >
-              {isResponsable() ? '✏️ Gérer astreinte' : '👁️ Consulter astreinte'}
-            </button>
-            {sortedAstreintes.map((astreinte, index) => {
-              const isValidated = astreinte.ValidationService === true;
-              
-              return (
-                <div 
-                  key={index} 
-                  style={{ 
-                    background: isJourAstreinte(astreinte) ? '#dbeafe' : '#e0f2fe', 
-                    padding: '8px', 
-                    borderRadius: '6px', 
-                    marginBottom: '8px', 
-                    fontSize: '12px', 
-                    position: 'relative',
-                    border: isValidated ? '2px solid #10b981' : '2px solid #3b82f6',
-                    opacity: isValidated ? 0.7 : 1
-                  }}
-                >
-                  <div style={{ fontWeight: '500', marginBottom: '4px' }}>
-                    {isJourAstreinte(astreinte) ? '☀️' : '🌙'} {getServiceName(astreinte.Service)}
-                  </div>
-                  <div style={{ color: '#6b7280', marginBottom: '4px' }}>
-                    {getClinicienName(astreinte.Clinicien)}
-                  </div>
-                  <button 
-                    onClick={() => {
-                      if (isValidated) {
-                        alert('Impossible de supprimer une astreinte validée');
-                        return;
-                      }
-                      handleDeleteAstreinte(astreinte);
-                    }} 
-                    style={{ 
-                      position: 'absolute', 
-                      top: '4px', 
-                      right: '4px', 
-                      background: isValidated ? '#d1d5db' : '#e3b1b1', 
-                      color: isValidated ? '#6b7280' : '#ef4444', 
-                      border: 'none', 
-                      borderRadius: '3px', 
-                      padding: '2px 4px', 
-                      fontSize: '10px', 
-                      cursor: isValidated ? 'not-allowed' : (isResponsable() ? 'pointer' : 'default'),
-                      opacity: isValidated ? 0.5 : (isResponsable() ? 1 : 0.3),
-                      display: isResponsable() ? 'block' : 'none'
-                    }}
-                    title={isValidated ? 'Impossible de supprimer une astreinte validée' : 'Supprimer cette astreinte'}
-                  >
-                    {isValidated ? '🔒' : '❌'}
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      );
-    }
-    
-    return (
-      <div style={{ 
-        display: 'flex', 
-        background: 'white', 
-        borderRadius: '8px', 
-        boxShadow: '0 2px 10px rgba(0,0,0,0.1)', 
-        overflow: 'hidden' 
-      }}>
-        {days}
+          );
+        })}
       </div>
     );
   };
 
-  const getCurrentViewTitle = () => {
-    switch (viewMode) {
-      case 'année':
-        return currentDate.getFullYear();
-      case 'mois':
-        return currentDate.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
-      case 'semaine':
-        const startOfWeek = new Date(currentDate); 
-        const dayOfWeek = startOfWeek.getDay();
-        const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-        startOfWeek.setDate(startOfWeek.getDate() - daysToSubtract);
-      
-        const endOfWeek = new Date(startOfWeek); 
-        endOfWeek.setDate(endOfWeek.getDate() + 6);
-        return `${startOfWeek.getDate()} - ${endOfWeek.getDate()} ${endOfWeek.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}`;
-      default:
-        return '';
-    }
-  };
+  // ── Rendu principal ─────────────────────────────────────────────────────────
+  if (loading) return <div style={{ textAlign: 'center', padding: '50px' }}><div style={{ fontSize: '48px', marginBottom: '20px' }}>📅</div><div>Chargement...</div></div>;
 
-  if (loading) {
-    return (
-      <div style={{ textAlign: 'center', padding: '50px' }}>
-        <div style={{ fontSize: '48px', marginBottom: '20px' }}>📅</div>
-        <div>Chargement du planning des astreintes...</div>
-      </div>
-    );
-  }
+  const viewAstr = getAstreintesView();
 
   return (
     <div style={{ padding: '2px', maxWidth: '1400px', margin: '0 auto' }}>
-      <div style={{
-        background: 'linear-gradient(135deg, #3b82f6 0%, #1e40af 100%)',
-        color: 'white',
-        padding: '2px',
-        borderRadius: '12px',
-        textAlign: 'center',
-        marginBottom: '10px'
-      }}>
-        <h1 style={{ 
-          fontSize: '1.5rem', 
-          marginBottom: '1px', 
-          display: 'flex', 
-          alignItems: 'center', 
-          justifyContent: 'center', 
-          gap: '2px' 
-        }}>
-          📅 Planning des astreintes
-        </h1>
-        <p style={{ fontSize: '1rem', opacity: '0.9' }}>
-          Gestion prévisionnelle des astreintes par service
-        </p>
+      <div style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #1e40af 100%)', color: 'white', padding: '10px', borderRadius: '12px', textAlign: 'center', marginBottom: '10px' }}>
+        <h1 style={{ fontSize: '1.5rem', margin: '0 0 4px 0' }}>📅 Planning des astreintes</h1>
+        <p style={{ fontSize: '1rem', margin: 0, opacity: 0.9 }}>Gestion prévisionnelle des astreintes par service</p>
       </div>
 
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: '30px',
-        flexWrap: 'wrap',
-        gap: '15px'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <button 
-            onClick={navigatePrevious} 
-            style={{
-              background: '#6b7280',
-              color: 'white',
-              border: 'none',
-              padding: '8px 12px',
-              borderRadius: '6px',
-              cursor: 'pointer'
-            }}
-          >
-            ←
-          </button>
-          
-          <button 
-            onClick={goToToday} 
-            style={{
-              background: '#10b981',
-              color: 'white',
-              border: 'none',
-              padding: '8px 16px',
-              borderRadius: '6px',
-              cursor: 'pointer'
-            }}
-          >
-            Aujourd'hui
-          </button>
-          
-          <button 
-            onClick={navigateNext} 
-            style={{
-              background: '#6b7280',
-              color: 'white',
-              border: 'none',
-              padding: '8px 12px',
-              borderRadius: '6px',
-              cursor: 'pointer'
-            }}
-          >
-            →
-          </button>
-          
-          <h2 style={{ margin: '0 0 0 15px', color: '#1f2937', textTransform: 'capitalize' }}>
-            {getCurrentViewTitle()}
-          </h2>
+      {/* Barre de navigation */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <button onClick={navigatePrevious} style={{ background: '#6b7280', color: 'white', border: 'none', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer' }}>←</button>
+          <button onClick={goToToday} style={{ background: '#10b981', color: 'white', border: 'none', padding: '8px 14px', borderRadius: '6px', cursor: 'pointer' }}>Aujourd'hui</button>
+          <button onClick={navigateNext} style={{ background: '#6b7280', color: 'white', border: 'none', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer' }}>→</button>
+          <h2 style={{ margin: '0 0 0 10px', color: '#1f2937', textTransform: 'capitalize', fontSize: '16px' }}>{getCurrentViewTitle()}</h2>
         </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-          <select
-            value={selectedServiceClinique}
-            onChange={(e) => setSelectedServiceClinique(e.target.value)}
-            style={{
-              padding: '8px 12px',
-              border: '1px solid #d1d5db',
-              borderRadius: '6px',
-              fontSize: '14px'
-            }}
-          >
-            <option value="tous">Tous les services cliniques</option>
-            {getServicesCliniques().map(serviceClinique => (
-              <option key={serviceClinique} value={serviceClinique}>
-                {serviceClinique}
-              </option>
-            ))}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <select value={selectedServiceClinique} onChange={e => setSelectedServiceClinique(e.target.value)} style={{ padding: '7px 10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px' }}>
+            <option value="tous">Tous les services</option>
+            {getServicesCliniquesNoms().map(sc => <option key={sc} value={sc}>{sc}</option>)}
           </select>
-
           <div style={{ display: 'flex', background: '#f3f4f6', borderRadius: '6px', padding: '2px' }}>
             {['année', 'mois', 'semaine'].map(mode => (
-              <button
-                key={mode}
-                onClick={() => setViewMode(mode)}
-                style={{
-                  background: viewMode === mode ? '#3b82f6' : 'transparent',
-                  color: viewMode === mode ? 'white' : '#374151',
-                  border: 'none',
-                  padding: '6px 12px',
-                  borderRadius: '4px',
-                  fontSize: '14px',
-                  cursor: 'pointer',
-                  textTransform: 'capitalize'
-                }}
-              >
-                {mode}
-              </button>
+              <button key={mode} onClick={() => setViewMode(mode)} style={{ background: viewMode === mode ? '#3b82f6' : 'transparent', color: viewMode === mode ? 'white' : '#374151', border: 'none', padding: '6px 12px', borderRadius: '4px', fontSize: '13px', cursor: 'pointer', textTransform: 'capitalize' }}>{mode}</button>
             ))}
           </div>
         </div>
       </div>
 
+      {/* Copier/Coller semaine */}
       {viewMode === 'semaine' && isResponsable() && (
-        <div style={{
-          background: 'white',
-          padding: '15px',
-          borderRadius: '8px',
-          boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
-          marginBottom: '20px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: '15px'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <button
-              onClick={handleCopyWeek}
-              style={{
-                background: 'linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)',
-                color: 'white',
-                border: 'none',
-                padding: '10px 20px',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                fontWeight: '600',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                transition: 'all 0.2s ease'
-              }}
-            >
-              📋 Copier cette semaine
-            </button>
-
-            <button
-              onClick={handlePasteWeek}
-              disabled={!copiedWeek || !copiedWeek.data || copiedWeek.data.length === 0}
-              style={{
-                background: (copiedWeek && copiedWeek.data && copiedWeek.data.length > 0) 
-                  ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' 
-                  : '#d1d5db',
-                color: (copiedWeek && copiedWeek.data && copiedWeek.data.length > 0) ? 'white' : '#9ca3af',
-                border: 'none',
-                padding: '10px 20px',
-                borderRadius: '6px',
-                cursor: (copiedWeek && copiedWeek.data && copiedWeek.data.length > 0) ? 'pointer' : 'not-allowed',
-                fontSize: '14px',
-                fontWeight: '600',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                transition: 'all 0.2s ease'
-              }}
-            >
-              📑️ Coller la semaine copiée
-            </button>
-          </div>
-
-          <div style={{ 
-            fontSize: '13px', 
-            color: '#6b7280',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px'
-          }}>
-			{copiedWeek && copiedWeek.data && copiedWeek.data.length > 0 ? (
-			  <span style={{ 
-				background: '#d1fae5', 
-				color: '#059669', 
-				padding: '4px 8px', 
-				borderRadius: '4px',
-				fontWeight: '600',
-				fontSize: '12px'
-			  }}>
-				✓ semaine du {copiedWeek.startDate.getDate()} - {copiedWeek.endDate.getDate()} {copiedWeek.endDate.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })} en mémoire : {copiedWeek.data.length} astreinte{copiedWeek.data.length > 1 ? 's' : ''} copiée{copiedWeek.data.length > 1 ? 's' : ''}
-			  </span>
-			) : (
-			  <span style={{ fontStyle: 'italic' }}>
-				ℹ️ Aucune semaine copiée
-			  </span>
-			)}
-          </div>
+        <div style={{ background: 'white', padding: '12px', borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.1)', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <button onClick={handleCopyWeek} style={{ background: '#06b6d4', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}>📋 Copier cette semaine</button>
+          <button onClick={handlePasteWeek} disabled={!copiedWeek?.data?.length} style={{ background: copiedWeek?.data?.length ? '#10b981' : '#d1d5db', color: copiedWeek?.data?.length ? 'white' : '#9ca3af', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: copiedWeek?.data?.length ? 'pointer' : 'not-allowed', fontSize: '13px', fontWeight: '600' }}>📑 Coller</button>
+          {copiedWeek?.data?.length > 0 && (
+            <span style={{ background: '#d1fae5', color: '#059669', padding: '4px 10px', borderRadius: '4px', fontSize: '12px', fontWeight: '600' }}>
+              ✓ {copiedWeek.data.length} astreinte{copiedWeek.data.length > 1 ? 's' : ''} copiée{copiedWeek.data.length > 1 ? 's' : ''} (sem. {copiedWeek.startDate.getDate()}-{copiedWeek.endDate.getDate()})
+            </span>
+          )}
         </div>
       )}
 
-      <div style={{ marginBottom: '30px' }}>
+      {/* Vue calendrier */}
+      <div style={{ marginBottom: '20px' }}>
         {viewMode === 'année' && renderYearView()}
         {viewMode === 'mois' && renderMonthView()}
         {viewMode === 'semaine' && renderWeekView()}
       </div>
 
-      {showAddModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(0,0,0,0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000
-        }}>
-          <div style={{
-            background: 'white',
-            padding: '30px',
-            borderRadius: '12px',
-            minWidth: '500px',
-            maxWidth: '90vw'
-          }}>
-            <h3 style={{ margin: '0 0 20px 0', color: '#1f2937' }}>
-              {isResponsable() 
-                ? ((formData.jour || formData.nuit) ? 'Modifier' : 'Nouvelle') + ' Astreinte'
-                : 'Consultation Astreinte'
-              } - {selectedDate.toLocaleDateString('fr-FR', { weekday: 'long' })} {formatDate(selectedDate)}
+      {/* Modal ajout/modification */}
+      {showAddModal && selectedDate && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ background: 'white', padding: '28px', borderRadius: '12px', minWidth: '480px', maxWidth: '90vw', maxHeight: '90vh', overflowY: 'auto' }}>
+            <h3 style={{ margin: '0 0 18px 0', color: '#1f2937' }}>
+              {isResponsable() ? (formData.jour || formData.nuit ? 'Modifier' : 'Nouvelle') + ' astreinte' : 'Consultation'} — {selectedDate.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
             </h3>
 
-            <div style={{ marginBottom: '4px' }}>
-              <label style={{ display: 'block', marginBottom: '5px', fontWeight: '500' }}>
-                Service *
-              </label>
-              <select
-                value={formData.service}
-                onChange={(e) => handleServiceChange(e.target.value)}
-                disabled={!isResponsable()}
-                style={{
-                  width: '100%',
-                  padding: '8px 12px',
-                  border: '1px solid #d1d5db',
-                  borderRadius: '6px',
-                  fontSize: '14px',
-                  backgroundColor: !isResponsable() ? '#f9fafb' : 'white',
-                  cursor: isResponsable() ? 'pointer' : 'default'
-                }}
-              >
+            <div style={{ marginBottom: '12px' }}>
+              <label style={{ display: 'block', marginBottom: '5px', fontWeight: '500', fontSize: '14px' }}>Service *</label>
+              <select value={formData.service} onChange={e => handleServiceChange(e.target.value)} disabled={!isResponsable()} style={{ width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', background: !isResponsable() ? '#f9fafb' : 'white' }}>
                 <option value="">Sélectionner un service</option>
-                {getServicesAutorises().map(service => (
-                  <option key={service.id} value={service.id}>
-                    {service.Denomination}
-                  </option>
-                ))}
+                {getServicesAutorises().map(s => <option key={s.id} value={s.id}>{s.TypeAstreinte}</option>)}
               </select>
             </div>
 
-
-			{formData.service && (
-              <div style={{
-                background: '#fef3c7',
-                border: '1px solid #f59e0b',
-                borderRadius: '6px',
-                padding: '2px',
-                marginBottom: '4px'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', marginBottom: '2px' }}>
-                  <span style={{ color: '#d97706', marginRight: '2px' }}>⚠️</span>
-                  <span style={{ fontSize: '14px', color: '#92400e' }}>{getDisabledJourMessage(selectedDate, formData.service)}</span>
-                </div>
+            {formData.service && getDisabledJourMsg(selectedDate, formData.service) && (
+              <div style={{ background: '#fef3c7', border: '1px solid #f59e0b', borderRadius: '6px', padding: '8px 12px', marginBottom: '12px', fontSize: '13px', color: '#92400e' }}>
+                ⚠️ {getDisabledJourMsg(selectedDate, formData.service)}
               </div>
             )}
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '20px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
+              {/* Jour */}
               <div>
-                <label style={{ display: 'flex', alignItems: 'center', marginBottom: '10px' }}>
-                  <input
-                    type="checkbox"
-                    checked={formData.jour}
-                    onChange={(e) => setFormData({...formData, jour: e.target.checked})}
-                    disabled={
-                      !isResponsable() || 
-                      formData.jourValidated || 
-                      shouldDisableJourAstreinte(selectedDate, formData.service)
-                    }
-                    style={{ 
-                      marginRight: '8px',
-                      opacity: (formData.jourValidated || shouldDisableJourAstreinte(selectedDate, formData.service)) ? 0.5 : 1
-                    }}
-                  />
-                  <span style={{ 
-                    fontWeight: '500',
-                    color: (formData.jourValidated || shouldDisableJourAstreinte(selectedDate, formData.service)) ? '#6b7280' : 'inherit'
-                  }}>
-                    ☀️ Astreinte de jour
-                    {formData.jourValidated && (
-                      <span style={{ 
-                        color: '#10b981', 
-                        marginLeft: '5px',
-                        fontSize: '12px'
-                      }}>
-                        ✓ Validée
-                      </span>
-                    )}
-                  </span>
+                <label style={{ display: 'flex', alignItems: 'center', marginBottom: '8px', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={formData.jour} onChange={e => setFormData({ ...formData, jour: e.target.checked })} disabled={!isResponsable() || formData.jourValidated || shouldDisableJour(selectedDate, formData.service)} style={{ marginRight: '8px' }} />
+                  <span style={{ fontWeight: '500', color: (formData.jourValidated || shouldDisableJour(selectedDate, formData.service)) ? '#9ca3af' : 'inherit' }}>☀️ Astreinte de jour</span>
                 </label>
                 {formData.jour && (
-                  <select
-                    value={formData.clinicienJour}
-                    onChange={(e) => setFormData({...formData, clinicienJour: e.target.value})}
-                    disabled={!isResponsable() || formData.jourValidated}
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      border: '1px solid #d1d5db',
-                      borderRadius: '6px',
-                      fontSize: '14px',
-                      backgroundColor: (!isResponsable() || formData.jourValidated) ? '#f9fafb' : 'white',
-                      cursor: (!isResponsable() || formData.jourValidated) ? 'default' : 'pointer',
-                      opacity: formData.jourValidated ? 0.7 : 1
-                    }}
-                  >
-                    <option value="">Sélectionner un clinicien</option>
-                    {getCliniciensByService(formData.service).map(clinicien => (
-                      <option key={clinicien.id} value={clinicien.id}>
-                        {clinicien.Clinicien}
-                      </option>
-                    ))}
+                  <select value={formData.clinicienJour} onChange={e => setFormData({ ...formData, clinicienJour: e.target.value })} disabled={!isResponsable() || formData.jourValidated} style={{ width: '100%', padding: '7px 10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px' }}>
+                    <option value="">Sélectionner</option>
+                    {getCliniciensByService(formData.service).map(c => <option key={c.id} value={c.id}>{c.Clinicien}</option>)}
                   </select>
                 )}
-                {formData.jourValidated && (
-                  <div style={{
-                    marginTop: '5px',
-                    padding: '8px',
-                    backgroundColor: '#d1fae5',
-                    borderRadius: '4px',
-                    fontSize: '12px',
-                    color: '#059669',
-                    border: '1px solid #10b981'
-                  }}>
-                    🔒 astreinte non modifiable
-                  </div>
-                )}
+                {formData.jourValidated && <div style={{ marginTop: '4px', padding: '6px', background: '#d1fae5', borderRadius: '4px', fontSize: '12px', color: '#059669' }}>🔒 Non modifiable</div>}
               </div>
-
+              {/* Nuit */}
               <div>
-                <label style={{ display: 'flex', alignItems: 'center', marginBottom: '10px' }}>
-                  <input
-                    type="checkbox"
-                    checked={formData.nuit}
-                    onChange={(e) => setFormData({...formData, nuit: e.target.checked})}
-                    disabled={!isResponsable() || formData.nuitValidated}
-                    style={{ 
-                      marginRight: '8px',
-                      opacity: formData.nuitValidated ? 0.5 : 1
-                    }}
-                  />
-                  <span style={{ 
-                    fontWeight: '500',
-                    color: formData.nuitValidated ? '#6b7280' : 'inherit'
-                  }}>
-                    🌙 Astreinte de nuit
-                    {formData.nuitValidated && (
-                      <span style={{ 
-                        color: '#10b981', 
-                        marginLeft: '5px',
-                        fontSize: '12px'
-                      }}>
-                        ✓ Validée
-                      </span>
-                    )}
-                  </span>
+                <label style={{ display: 'flex', alignItems: 'center', marginBottom: '8px', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={formData.nuit} onChange={e => setFormData({ ...formData, nuit: e.target.checked })} disabled={!isResponsable() || formData.nuitValidated} style={{ marginRight: '8px' }} />
+                  <span style={{ fontWeight: '500', color: formData.nuitValidated ? '#9ca3af' : 'inherit' }}>🌙 Astreinte de nuit</span>
                 </label>
                 {formData.nuit && (
-                  <select
-                    value={formData.clinicienNuit}
-                    onChange={(e) => setFormData({...formData, clinicienNuit: e.target.value})}
-                    disabled={!isResponsable() || formData.nuitValidated}
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      border: '1px solid #d1d5db',
-                      borderRadius: '6px',
-                      fontSize: '14px',
-                      backgroundColor: (!isResponsable() || formData.nuitValidated) ? '#f9fafb' : 'white',
-                      cursor: (!isResponsable() || formData.nuitValidated) ? 'default' : 'pointer',
-                      opacity: formData.nuitValidated ? 0.7 : 1
-                    }}
-                  >
-                    <option value="">Sélectionner un clinicien</option>
-                    {getCliniciensByService(formData.service).map(clinicien => (
-                      <option key={clinicien.id} value={clinicien.id}>
-                        {clinicien.Clinicien}
-                      </option>
-                    ))}
+                  <select value={formData.clinicienNuit} onChange={e => setFormData({ ...formData, clinicienNuit: e.target.value })} disabled={!isResponsable() || formData.nuitValidated} style={{ width: '100%', padding: '7px 10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px' }}>
+                    <option value="">Sélectionner</option>
+                    {getCliniciensByService(formData.service).map(c => <option key={c.id} value={c.id}>{c.Clinicien}</option>)}
                   </select>
                 )}
-                {formData.nuitValidated && (
-                  <div style={{
-                    marginTop: '5px',
-                    padding: '8px',
-                    backgroundColor: '#d1fae5',
-                    borderRadius: '4px',
-                    fontSize: '12px',
-                    color: '#059669',
-                    border: '1px solid #10b981'
-                  }}>
-                    🔒 astreinte non modifiable
-                  </div>
-                )}
+                {formData.nuitValidated && <div style={{ marginTop: '4px', padding: '6px', background: '#d1fae5', borderRadius: '4px', fontSize: '12px', color: '#059669' }}>🔒 Non modifiable</div>}
               </div>
             </div>
 
             <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-              <button
-                onClick={() => {
-                  setShowAddModal(false);
-                  setFormData({ service: '', clinicienJour: '', clinicienNuit: '', date: '', jour: false, nuit: false, jourValidated: false, nuitValidated: false });
-                }}
-                style={{
-                  background: '#6b7280',
-                  color: 'white',
-                  border: 'none',
-                  padding: '10px 20px',
-                  borderRadius: '6px',
-                  cursor: 'pointer'
-                }}
-              >
-                {isResponsable() ? 'Annuler' : 'Fermer'}
-              </button>
-
-              {isResponsable() && (
-                <button
-                  onClick={handleSaveAstreinte}
-                  style={{
-                    background: '#3b82f6',
-                    color: 'white',
-                    border: 'none',
-                    padding: '10px 20px',
-                    borderRadius: '6px',
-                    cursor: 'pointer'
-                  }}
-                >
-                  Sauvegarder
-                </button>
-              )}
+              <button onClick={() => { setShowAddModal(false); setFormData({ service: '', clinicienJour: '', clinicienNuit: '', date: '', jour: false, nuit: false, jourValidated: false, nuitValidated: false }); }} style={{ background: '#6b7280', color: 'white', border: 'none', padding: '9px 20px', borderRadius: '6px', cursor: 'pointer' }}>{isResponsable() ? 'Annuler' : 'Fermer'}</button>
+              {isResponsable() && <button onClick={handleSaveAstreinte} style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '9px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: '600' }}>Sauvegarder</button>}
             </div>
           </div>
         </div>
       )}
 
-      <div style={{
-        background: 'white',
-        padding: '20px',
-        borderRadius: '8px',
-        boxShadow: '0 2px 10px rgba(0,0,0,0.1)'
-      }}>
-        <h3 style={{ margin: '0 0 15px 0', color: '#1f2937' }}>Légende</h3>
-        <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div style={{
-              width: '16px',
-              height: '16px',
-              background: '#dbeafe',
-              borderRadius: '3px',
-			  border: '2px solid #3b82f6'
-            }}></div>
-            <span style={{ fontSize: '14px' }}>☀️ Astreinte de jour</span>
+      {/* Statistiques */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '15px' }}>
+        <div style={{ gridColumn: '1 / -1', textAlign: 'center' }}><h3 style={{ color: '#1f2937', margin: '0 0 10px 0' }}>Statistiques {getPeriodTitle()}</h3></div>
+        {[
+          { label: 'Total astreintes', value: viewAstr.length, color: '#3b82f6' },
+          { label: 'Astreintes de jour', value: viewAstr.filter(a => isJour(a)).length, color: '#10b981' },
+          { label: 'Astreintes de nuit', value: viewAstr.filter(a => isNuit(a)).length, color: '#8b5cf6' },
+          { label: 'Services concernés', value: new Set(viewAstr.map(a => a.TypeAstreinte)).size, color: '#f59e0b' }
+        ].map(s => (
+          <div key={s.label} style={{ background: 'white', padding: '18px', borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.1)', textAlign: 'center' }}>
+            <div style={{ fontSize: '28px', color: s.color, fontWeight: 'bold', marginBottom: '4px' }}>{s.value}</div>
+            <div style={{ color: '#6b7280', fontSize: '13px' }}>{s.label}</div>
           </div>
-          
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div style={{
-              width: '16px',
-              height: '16px',
-              background: '#e0f2fe',
-              borderRadius: '3px',
-			  border: '2px solid #3b82f6'
-            }}></div>
-            <span style={{ fontSize: '14px' }}>🌙 Astreinte de nuit</span>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div style={{
-              width: '16px',
-              height: '16px',
-              background: '#dbeafe',
-              borderRadius: '3px',
-              border: '2px solid #10b981'
-            }}></div>
-            <span style={{ fontSize: '14px' }}>Astreinte validée</span>
-          </div>
-        </div>
-      </div>
-
-      <div style={{
-        marginTop: '30px',
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-        gap: '20px'
-      }}>
-        <div style={{
-          gridColumn: '1 / -1',
-          textAlign: 'center',
-          marginBottom: '10px'
-        }}>
-          <h3 style={{ color: '#1f2937', margin: '0' }}>
-            Statistiques {getPeriodTitle()}
-            {selectedServiceClinique !== 'tous' && 
-              ` - ${selectedServiceClinique}`}
-          </h3>
-        </div>
-
-        <div style={{
-          background: 'white',
-          padding: '20px',
-          borderRadius: '8px',
-          boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
-          textAlign: 'center'
-        }}>
-          <div style={{ fontSize: '32px', color: '#3b82f6', fontWeight: 'bold', marginBottom: '5px' }}>
-            {getAstreintesForCurrentView().length}
-          </div>
-          <div style={{ color: '#6b7280' }}>Total astreintes</div>
-        </div>
-
-        <div style={{
-          background: 'white',
-          padding: '20px',
-          borderRadius: '8px',
-          boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
-          textAlign: 'center'
-        }}>
-          <div style={{ fontSize: '32px', color: '#10b981', fontWeight: 'bold', marginBottom: '5px' }}>
-            {getAstreintesForCurrentView().filter(a => isJourAstreinte(a)).length}
-          </div>
-          <div style={{ color: '#6b7280' }}>Astreintes de jour</div>
-        </div>
-
-        <div style={{
-          background: 'white',
-          padding: '20px',
-          borderRadius: '8px',
-          boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
-          textAlign: 'center'
-        }}>
-          <div style={{ fontSize: '32px', color: '#8b5cf6', fontWeight: 'bold', marginBottom: '5px' }}>
-            {getAstreintesForCurrentView().filter(a => isNuitAstreinte(a)).length}
-          </div>
-          <div style={{ color: '#6b7280' }}>Astreintes de nuit</div>
-        </div>
-
-        <div style={{
-          background: 'white',
-          padding: '20px',
-          borderRadius: '8px',
-          boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
-          textAlign: 'center'
-        }}>
-          <div style={{ fontSize: '32px', color: '#f59e0b', fontWeight: 'bold', marginBottom: '5px' }}>
-            {selectedServiceClinique === 'tous' 
-              ? new Set(getAstreintesForCurrentView().map(a => a.Service)).size
-              : (getAstreintesForCurrentView().length > 0 ? services.filter(s => s.gristHelper_Display2 === selectedServiceClinique).length : 0)
-            }
-          </div>
-          <div style={{ color: '#6b7280' }}>
-            Service{(selectedServiceClinique === 'tous' ? new Set(getAstreintesForCurrentView().map(a => a.Service)).size : (getAstreintesForCurrentView().length > 0 ? services.filter(s => s.gristHelper_Display2 === selectedServiceClinique).length : 0)) > 1 ? 's' : ''} avec astreinte{(selectedServiceClinique === 'tous' ? new Set(getAstreintesForCurrentView().map(a => a.Service)).size : (getAstreintesForCurrentView().length > 0 ? services.filter(s => s.gristHelper_Display2 === selectedServiceClinique).length : 0)) > 1 ? 's' : ''}
-          </div>
-        </div>
+        ))}
       </div>
     </div>
   );
