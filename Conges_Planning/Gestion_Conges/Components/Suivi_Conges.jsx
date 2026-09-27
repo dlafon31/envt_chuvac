@@ -1,4 +1,5 @@
 const Component = () => {
+	
   // CORRIGÉ : Fonction pour déterminer l'année scolaire courante basée sur le 1er septembre
   const getCurrentSchoolYear = () => {
     const today = new Date();
