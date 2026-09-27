@@ -52,7 +52,7 @@ const Component = () => {
         && date.getMonth()    === b.getMonth()
         && date.getDate()     === b.getDate();
   };
-
+  
   const navigatePrevious = () => { const d = new Date(currentDate); if (viewMode === 'année') d.setFullYear(d.getFullYear() - 1); else if (viewMode === 'mois') d.setMonth(d.getMonth() - 1); else d.setDate(d.getDate() - 7); setCurrentDate(d); };
   const navigateNext = () => { const d = new Date(currentDate); if (viewMode === 'année') d.setFullYear(d.getFullYear() + 1); else if (viewMode === 'mois') d.setMonth(d.getMonth() + 1); else d.setDate(d.getDate() + 7); setCurrentDate(d); };
   const goToToday = () => setCurrentDate(new Date());
