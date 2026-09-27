@@ -75,10 +75,11 @@ const Component = () => {
   };
   
   const sameDay = (date, timestamp) => {
-    const a = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 12, 0, 0);
+    if (timestamp === null || timestamp === undefined || timestamp === '') return false;
     const b = new Date(timestamp * 1000);
-    const bn = new Date(b.getFullYear(), b.getMonth(), b.getDate(), 12, 0, 0);
-    return Math.abs(a - bn) / 86400000 < 1;
+    return date.getFullYear() === b.getFullYear()
+        && date.getMonth()    === b.getMonth()
+        && date.getDate()     === b.getDate();
   };
 
   const isJourFerie = (date) =>
