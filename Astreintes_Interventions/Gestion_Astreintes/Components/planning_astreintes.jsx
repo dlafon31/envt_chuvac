@@ -63,11 +63,17 @@ const Component = () => {
 
   // ── Utilitaires dates ───────────────────────────────────────────────────────
   const formatDate = (date) => new Date(date).toLocaleDateString('fr-FR');
+  
+  // Convention unique : tout timestamp de jour est ancré à midi local.
+  const dayToTimestamp = (d) =>
+    Math.floor(new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0).getTime() / 1000);
+
   const dateToTimestamp = (s) => {
     if (!s) return null;
     const [y, m, d] = s.split('-').map(Number);
-    return Math.floor(new Date(y, m - 1, d, 12, 0, 0).getTime() / 1000);
+    return dayToTimestamp(new Date(y, m - 1, d));
   };
+  
   const sameDay = (date, timestamp) => {
     const a = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 12, 0, 0);
     const b = new Date(timestamp * 1000);
@@ -311,7 +317,7 @@ const Component = () => {
     for (const ca of copiedWeek.data) {
       try {
         const day = new Date(sw); day.setDate(day.getDate() + ca.dayOffset);
-        const ts = Math.floor(day.getTime() / 1000);
+        const ts = dayToTimestamp(day);
         const existing = getAstreintesForDate(day).find(a => a.TypeAstreinte === ca.service && a.Type === ca.type);
         if (existing) {
           if (existing.En_Suivi) continue;
