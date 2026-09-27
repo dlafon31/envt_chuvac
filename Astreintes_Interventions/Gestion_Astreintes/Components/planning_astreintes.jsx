@@ -63,7 +63,6 @@ const Component = () => {
 
   // ── Utilitaires dates ───────────────────────────────────────────────────────
   const formatDate = (date) => new Date(date).toLocaleDateString('fr-FR');
-  
   // Convention unique : tout timestamp de jour est ancré à midi local.
   const dayToTimestamp = (d) =>
     Math.floor(new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0).getTime() / 1000);
@@ -205,6 +204,7 @@ const Component = () => {
     if (p.portee === 'tous')  return list;
     return list.filter(a => p.noms.includes(a.ServiceClinique));
   };
+
 
   const getAstreintesView = () => filterBySC(filterByPeriod(filterByUser(astreintes)));
 
